@@ -76,7 +76,7 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
 
 int main(int argc, char *argv[])
 {
-    long int number[256];
+    long int occurances[256];
     long int total_bits = 0;
     int letter_count = 0;
     if (argc == 1)
@@ -85,7 +85,7 @@ int main(int argc, char *argv[])
              << "try './archive {{file_name}}'" << endl;
         return 0;
     }
-    for (long int *i = number; i < number + 256; i++)
+    for (long int *i = occurances; i < occurances + 256; i++)
     {
         *i = 0;
     }
@@ -114,18 +114,17 @@ int main(int argc, char *argv[])
     scompressed += ".compressed";
 
     // Histograming the frequency of bytes.
-    unsigned char *x_p, x; // these are temp variables to take input from the file
-    x_p = &x;
+    unsigned char *x_ptr, x; // these are temp variables to take input from the file
+    x_ptr = &x;
     long int total_size = 0, size;
     total_bits += 16 + 9 * (argc - 1);
     for (int current_file = 1; current_file < argc; current_file++)
     {
         for (char *c = argv[current_file]; *c; c++)
         { // counting usage frequency of unique bytes on the file name (or folder name)
-            number[(unsigned char)(*c)]++;
+            occurances[(unsigned char)(*c)]++;
         }
 
-        // This is a file, not a directory.
         size = size_of_the_file(argv[current_file]);
         total_size += size;
         total_bits += 64;
@@ -133,17 +132,17 @@ int main(int argc, char *argv[])
         // "rb" is for reading binary files
         original_fp = fopen(argv[current_file], "rb");
         // reading the first byte of the file into x.
-        fread(x_p, 1, 1, original_fp);
-        for (long int j = 0; j < size; j++)
+        fread(x_ptr, 1, 1, original_fp);
+        for (long int i = 0; i < size; i++)
         { // counting usage frequency of unique bytes inside the file
-            number[x]++;
-            fread(x_p, 1, 1, original_fp);
+            occurances[x]++;
+            fread(x_ptr, 1, 1, original_fp);
         }
         fclose(original_fp);
     }
 
     // Traverse through all possible bytes and count the number of unique bytes.
-    for (long int *i = number; i < number + 256; i++)
+    for (long int *i = occurances; i < occurances + 256; i++)
     {
         if (*i)
         {
@@ -158,14 +157,14 @@ int main(int argc, char *argv[])
     // instead its info will be written in a new string array called str_arr
     TreeNode array[letter_count * 2 - 1];
     TreeNode *e = array;
-    for (long int *i = number; i < number + 256; i++)
+    for (long int *i = occurances; i < occurances + 256; i++)
     {
         if (*i)
         {
             e->right = NULL;
             e->left = NULL;
             e->occurances = *i;
-            e->character = i - number;
+            e->character = i - occurances;
             e++;
         }
     }
@@ -173,10 +172,11 @@ int main(int argc, char *argv[])
     //---------------------------------------------
 
     //-------------------4-------------------------
-    // min1 and min2 represents nodes that has minimum weights
-    // isleaf is the pointer that traverses through leafs and
-    // notleaf is the pointer that traverses through nodes that are not leafs
-    TreeNode *min1 = array, *min2 = array + 1, *current = array + letter_count, *notleaf = array + letter_count, *isleaf = array + 2;
+    TreeNode *min1 = array;
+    TreeNode *min2 = array + 1;
+    TreeNode *current = array + letter_count;
+    TreeNode *internalNode = array + letter_count;
+    TreeNode *leafNode = array + 2;
     for (int i = 0; i < letter_count - 1; i++)
     {
         current->occurances = min1->occurances + min2->occurances;
@@ -186,122 +186,105 @@ int main(int argc, char *argv[])
         min2->bit = "0";
         current++;
 
-        if (isleaf >= array + letter_count)
+        // Check if we have processed all leaf nodes
+        if (leafNode >= array + letter_count)
         {
-            min1 = notleaf;
-            notleaf++;
+            // If all leaf nodes are processed, use the next available internal node
+            min1 = internalNode;
+            internalNode++;
         }
         else
         {
-            if (isleaf->occurances < notleaf->occurances)
+            // If there are still leaf nodes, compare the frequency of the current leaf node with the current internal node
+            if (leafNode->occurances < internalNode->occurances)
             {
-                min1 = isleaf;
-                isleaf++;
+                // If the leaf node's frequency is less, choose it for merging
+                min1 = leafNode;
+                leafNode++;
             }
             else
             {
-                min1 = notleaf;
-                notleaf++;
+                // If the internal node's frequency is less or equal, choose it for merging
+                min1 = internalNode;
+                internalNode++;
             }
         }
 
-        if (isleaf >= array + letter_count)
+        if (leafNode >= array + letter_count)
         {
-            min2 = notleaf;
-            notleaf++;
+            // If all leaf nodes are processed, use the next available internal node
+            min2 = internalNode;
+            internalNode++;
         }
-        else if (notleaf >= current)
+        else if (internalNode >= current)
         {
-            min2 = isleaf;
-            isleaf++;
+            // If all internal nodes up to 'current' are processed, use the next leaf node
+            min2 = leafNode;
+            leafNode++;
         }
         else
         {
-            if (isleaf->occurances < notleaf->occurances)
+            // If there are both leaf and internal nodes available, compare to find the smaller frequency
+            if (leafNode->occurances < internalNode->occurances)
             {
-                min2 = isleaf;
-                isleaf++;
+                // If the leaf node's frequency is less, choose it for merging
+                min2 = leafNode;
+                leafNode++;
             }
             else
             {
-                min2 = notleaf;
-                notleaf++;
+                // If the internal node's frequency is less or equal, choose it for merging
+                min2 = internalNode;
+                internalNode++;
             }
         }
     }
-    // At every cycle, 2 of the least weighted nodes will be chosen to
-    // create a new node that has weight equal to sum of their weights combined.
-    // After we are done with these nodes they will become childrens of created nodes
-    // and they will be passed so that they wont be used in this process again.
+
     //---------------------------------------------
 
     //-------------------5-------------------------
+    // Start from the last internal node (just before the root node) and move backwards through the array
     for (e = array + letter_count * 2 - 2; e > array - 1; e--)
     {
+        // If the current node has a left child, prepend the current node's bit string to the left child's.
+        // This operation effectively assigns a '0' or '1' to the bit string, according to the child's position.
+        // Since we are moving from the bottom of the tree upwards, we are actually appending the path bits
+        // to each node's bit string, constructing the final encoded bit string in reverse.
         if (e->left)
         {
             e->left->bit = e->bit + e->left->bit;
         }
+
+        // Perform a similar operation for the right child, if present.
+        // This step ensures that each step towards a leaf node from the root
+        // is recorded as a series of bits ('0's for left moves and '1's for right moves),
+        // which collectively form the Huffman code for the character represented by the leaf.
         if (e->right)
         {
             e->right->bit = e->bit + e->right->bit;
         }
     }
-    // In this block we are adding the bytes from root to leafs
-    // and after this is done every leaf will have a transformation string that corresponds to it
-    // Note: It is actually a very neat process. Using 4th and 5th code blocks, we are making sure that
-    // the most used character is using least number of bits.
-    // Specific number of bits we re going to use for that character is determined by weight distribution
     //---------------------------------------------
 
     compressed_fp = fopen(&scompressed[0], "wb");
     int current_bit_count = 0;
     unsigned char current_byte;
-    //--------------writes first--------------
+    // Write the first piece of header information to the file: the letter count.
+    // This is the count of unique bytes (or characters) that have been encountered in the input.
+    // This count is crucial for reconstructing the Huffman tree when decompressing the file.
     fwrite(&letter_count, 1, 1, compressed_fp);
+    // Update the total_bits variable to account for the 8 bits (1 byte) just written to the file.
+    // total_bits keeps track of the size of the compressed file in bits.
     total_bits += 8;
     //----------------------------------------
 
     //--------------writes second-------------
-    {
-        cout << "If you want a password write any number other then 0" << endl
-             << "If you do not, write 0" << endl;
-        int check_password;
-        cin >> check_password;
-        if (check_password)
-        {
-            string password;
-            cout << "Enter your password (Do not use whitespaces): ";
-            cin >> password;
-            int password_length = password.length();
-            if (password_length == 0)
-            {
-                cout << "You did not enter a password" << endl
-                     << "Process has been terminated" << endl;
-                fclose(compressed_fp);
-                remove(&scompressed[0]);
-                return 0;
-            }
-            if (password_length > 100)
-            {
-                cout << "Password cannot contain more then 100 characters" << endl
-                     << "Process has been terminated" << endl;
-                fclose(compressed_fp);
-                remove(&scompressed[0]);
-                return 0;
-            }
-            unsigned char password_length_unsigned = password_length;
-            fwrite(&password_length_unsigned, 1, 1, compressed_fp);
-            fwrite(&password[0], 1, password_length, compressed_fp);
-            total_bits += 8 + 8 * password_length;
-        }
-        else
-        {
-            fwrite(&check_password, 1, 1, compressed_fp);
-            total_bits += 8;
-        }
-    }
-    // Above code block puts password to compressed file
+
+    // Removed password functionality. Safe to ignore.
+    int check_password = 0;
+    fwrite(&check_password, 1, 1, compressed_fp);
+    total_bits += 8;
+
     //----------------------------------------
 
     //------------writes third---------------
