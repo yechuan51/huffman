@@ -112,7 +112,7 @@ int main(int argc, char *argv[])
     // Histograming the frequency of bytes.
     unsigned char *x_ptr, x; // these are temp variables to take input from the file
     x_ptr = &x;
-    long int total_size = 0, size;
+    long int totalSize = 0, size;
     totalBitCount += 16 + 9 * (argc - 1);
     for (int current_file = 1; current_file < argc; current_file++)
     {
@@ -122,7 +122,7 @@ int main(int argc, char *argv[])
         }
 
         size = size_of_the_file(argv[current_file]);
-        total_size += size;
+        totalSize += size;
         totalBitCount += 64;
 
         // "rb" is for reading binary files
@@ -249,87 +249,81 @@ int main(int argc, char *argv[])
 
     //----------------------------------------
 
-    char *str_pointer;
-    unsigned char len, current_character;
-    string str_arr[256];
-    for (currentNode = nodesForHuffmanTree; currentNode < nodesForHuffmanTree + letter_count; currentNode++)
+    // Initializing a pointer for iterating through the transformation strings.
+    char *transformationStringPtr;
+    // Variables for storing the length of the transformation string and the current character being processed.
+    unsigned char transformationLength, currentCharacter;
+    // Array to store transformation strings for each unique character to optimize compression.
+    string transformationStrings[256];
+
+    // Iterate through each node in the Huffman tree to write transformation codes to the compressed file.
+    for (TreeNode *node = nodesForHuffmanTree; node < nodesForHuffmanTree + letter_count; node++)
     {
-        str_arr[(currentNode->character)] = currentNode->bit; // we are putting the transformation string to str_arr array to make the compression process more time efficient
-        len = currentNode->bit.length();
-        current_character = currentNode->character;
+        // Store the transformation string for the current character in the array.
+        transformationStrings[node->character] = node->bit;
+        transformationLength = node->bit.length();
+        currentCharacter = node->character;
 
-        write_from_uChar(current_character, bufferByte, bitCounter, compressedFilePtr);
-        write_from_uChar(len, bufferByte, bitCounter, compressedFilePtr);
-        totalBitCount += len + 16;
-        // above lines will write the byte and the number of bits
-        // we re going to need to represent this specific byte's transformated version
-        // after here we are going to write the transformed version of the number bit by bit.
+        // Write the current character and its transformation string length to the compressed file.
+        write_from_uChar(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
+        write_from_uChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
+        // Updating the total bit count to include the bits for the character and its length.
+        totalBitCount += transformationLength + 16;
 
-        str_pointer = &currentNode->bit[0];
-        while (*str_pointer)
+        // Write the transformation string bit by bit to the compressed file.
+        transformationStringPtr = &node->bit[0];
+        while (*transformationStringPtr)
         {
             if (bitCounter == 8)
             {
                 fwrite(&bufferByte, 1, 1, compressedFilePtr);
                 bitCounter = 0;
             }
-            switch (*str_pointer)
+            if (*transformationStringPtr == '1')
             {
-            case '1':
                 bufferByte <<= 1;
                 bufferByte |= 1;
-                bitCounter++;
-                break;
-            case '0':
-                bufferByte <<= 1;
-                bitCounter++;
-                break;
-            default:
-                cout << "An error has occurred" << endl
-                     << "Compression process aborted" << endl;
-                fclose(compressedFilePtr);
-                remove(&scompressed[0]);
-                return 1;
             }
-            str_pointer++;
+            else
+            {
+                bufferByte <<= 1;
+            }
+            bitCounter++;
+            transformationStringPtr++;
         }
 
-        totalBitCount += len * (currentNode->occurances);
+        // Adjust the total bit count based on the occurrences of the current character.
+        totalBitCount += transformationLength * (node->occurances);
     }
+
+    // Adjust the total bit count to be a multiple of 8, ensuring it represents the total number of bytes used.
     if (totalBitCount % 8)
     {
         totalBitCount = (totalBitCount / 8 + 1) * 8;
-        // from this point on total bits doesnt represent total bits
-        // instead it represents 8*number_of_bytes we are gonna use on our compressed file
     }
-    // Above loop writes the translation script into compressed file and the str_arr array
+    // This loop processes the Huffman tree nodes, writing their associated transformation scripts to the compressed file.
     //----------------------------------------
 
-    cout << "The size of the sum of ORIGINAL files is: " << total_size << " bytes" << endl;
+    cout << "The size of the sum of ORIGINAL files is: " << totalSize << " bytes" << endl;
     cout << "The size of the COMPRESSED file will be: " << totalBitCount / 8 << " bytes" << endl;
-    cout << "Compressed file's size will be [%" << 100 * ((float)totalBitCount / 8 / total_size) << "] of the original file" << endl;
-    if (totalBitCount / 8 > total_size)
+
+    float compressionRatio = 100.0f * static_cast<float>(totalBitCount) / 8.0f / static_cast<float>(totalSize);
+    cout << "Compressed file's size will be approximately [" << compressionRatio << "%] of the original files." << endl;
+
+    // Warning if the compressed file is unexpectedly larger than the original sum.
+    if (totalBitCount / 8 > totalSize)
     {
-        cout << endl
-             << "COMPRESSED FILE'S SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS" << endl
-             << endl;
-    }
-    cout << "If you wish to abort this process write 0 and press enter" << endl
-         << "If you want to continue write any other number and press enter" << endl;
-    int check;
-    cin >> check;
-    if (!check)
-    {
-        cout << endl
-             << "Process has been aborted" << endl;
-        fclose(compressedFilePtr);
-        remove(&scompressed[0]);
-        return 0;
+        cout << "\nWARNING: The compressed file's size is larger than the sum of the originals.\n\n";
     }
 
-    PROGRESS.MAX = (nodesForHuffmanTree + letter_count * 2 - 2)->occurances; // setting progress bar
+    // Setting the progress bar's maximum value to the total occurrences of all
+    // characters, represented by the root node of the Huffman tree. This reflects the
+    // total number of characters processed during compression, providing a measure for
+    // tracking compression progress.
+    PROGRESS.MAX = (nodesForHuffmanTree + letter_count * 2 - 2)->occurances;
 
-    //-------------writes fourth---------------
+    // Writing the total count of files to be compressed to the header of the
+    // compressed file.
     write_file_count(argc - 1, bufferByte, bitCounter, compressedFilePtr);
     //---------------------------------------
 
@@ -354,9 +348,9 @@ int main(int argc, char *argv[])
             bitCounter++;
             //---------------------------------------
 
-            write_file_size(size, bufferByte, bitCounter, compressedFilePtr);                                  // writes sixth
-            write_file_name(argv[current_file], str_arr, bufferByte, bitCounter, compressedFilePtr);           // writes seventh
-            write_the_file_content(originalFilePtr, size, str_arr, bufferByte, bitCounter, compressedFilePtr); // writes eighth
+            write_file_size(size, bufferByte, bitCounter, compressedFilePtr);                                                // writes sixth
+            write_file_name(argv[current_file], transformationStrings, bufferByte, bitCounter, compressedFilePtr);           // writes seventh
+            write_the_file_content(originalFilePtr, size, transformationStrings, bufferByte, bitCounter, compressedFilePtr); // writes eighth
             fclose(originalFilePtr);
         }
         else
@@ -372,10 +366,10 @@ int main(int argc, char *argv[])
             bitCounter++;
             //---------------------------------------
 
-            write_file_name(argv[current_file], str_arr, bufferByte, bitCounter, compressedFilePtr); // writes seventh
+            write_file_name(argv[current_file], transformationStrings, bufferByte, bitCounter, compressedFilePtr); // writes seventh
 
             string folder_name = argv[current_file];
-            write_the_folder(folder_name, str_arr, bufferByte, bitCounter, compressedFilePtr);
+            write_the_folder(folder_name, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
         }
     }
 
@@ -390,7 +384,6 @@ int main(int argc, char *argv[])
     }
 
     fclose(compressedFilePtr);
-    system("clear");
     cout << endl
          << "Created compressed file: " << scompressed << endl;
     cout << "Compression is complete" << endl;
