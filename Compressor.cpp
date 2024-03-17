@@ -62,8 +62,9 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
 int main(int argc, char *argv[])
 {
     long int occurances[256];
+    // totalBitCount only tracks the number of bits that's going to be written to the compressed file.
     long int totalBitCount = 0;
-    int uniqueLetterCount = 0;
+    int uniqueSymbolCount = 0;
     if (argc != 2)
     {
         std::cout << "Must provide a single file name." << endl;
@@ -88,7 +89,7 @@ int main(int argc, char *argv[])
     unsigned char *readBufPtr, readBuf;
     readBufPtr = &readBuf;
     long int totalSize = 0, size;
-    totalBitCount += 16 + 9 * (argc - 1);
+    totalBitCount += 16 + 8;
 
     for (char *c = argv[1]; *c; c++)
     { // counting usage frequency of unique bytes on the file name
@@ -101,7 +102,7 @@ int main(int argc, char *argv[])
 
     // "rb" is for reading binary files
     originalFilePtr = fopen(argv[1], "rb");
-    // reading the first byte of the file into x.
+    // reading the first byte of the file into readBuf.
     fread(readBufPtr, 1, 1, originalFilePtr);
     for (long int i = 0; i < size; i++)
     { // counting usage frequency of unique bytes inside the file
@@ -115,7 +116,7 @@ int main(int argc, char *argv[])
     {
         if (*i)
         {
-            uniqueLetterCount++;
+            uniqueSymbolCount++;
         }
     }
     //---------------------------------------------
@@ -123,7 +124,7 @@ int main(int argc, char *argv[])
     //--------------------3------------------------
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
     // Each leaf node represents a unique byte and its frequency in the input data.
-    TreeNode nodesForHuffmanTree[uniqueLetterCount * 2 - 1];
+    TreeNode nodesForHuffmanTree[uniqueSymbolCount * 2 - 1];
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
@@ -141,15 +142,15 @@ int main(int argc, char *argv[])
 
     // Step 3: Sort the leaf nodes based on frequency to prepare for tree construction.
     // In ascending order.
-    sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueLetterCount, TreeNodeCompare);
+    sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount, TreeNodeCompare);
 
     // Step 4: Construct the Huffman tree by merging nodes with the lowest frequencies.
     TreeNode *smallestNode = nodesForHuffmanTree;
     TreeNode *secondSmallestNode = nodesForHuffmanTree + 1;
-    TreeNode *newInternalNode = nodesForHuffmanTree + uniqueLetterCount;
-    TreeNode *nextInternalNode = nodesForHuffmanTree + uniqueLetterCount;
+    TreeNode *newInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
+    TreeNode *nextInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
     TreeNode *nextLeafNode = nodesForHuffmanTree + 2;
-    for (int i = 0; i < uniqueLetterCount - 1; i++)
+    for (int i = 0; i < uniqueSymbolCount - 1; i++)
     {
         // Create a new internal node that combines the two smallest nodes.
         newInternalNode->occurances = smallestNode->occurances + secondSmallestNode->occurances;
@@ -162,7 +163,7 @@ int main(int argc, char *argv[])
         newInternalNode++;
 
         // Update smallestNode and secondSmallestNode for the next iteration.
-        if (nextLeafNode >= nodesForHuffmanTree + uniqueLetterCount)
+        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount)
         {
             // All leaf nodes have been processed; proceed with internal nodes.
             smallestNode = nextInternalNode;
@@ -175,7 +176,7 @@ int main(int argc, char *argv[])
         }
 
         // Repeat the process for secondSmallestNode.
-        if (nextLeafNode >= nodesForHuffmanTree + uniqueLetterCount)
+        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount)
         {
             secondSmallestNode = nextInternalNode;
             nextInternalNode++;
@@ -193,7 +194,7 @@ int main(int argc, char *argv[])
 
     // Step 5: Assign Huffman codes to each node.
     // Iterate from the last internal node to the root, building the Huffman codes in reverse.
-    for (TreeNode *node = nodesForHuffmanTree + uniqueLetterCount * 2 - 2; node > nodesForHuffmanTree - 1; node--)
+    for (TreeNode *node = nodesForHuffmanTree + uniqueSymbolCount * 2 - 2; node > nodesForHuffmanTree - 1; node--)
     {
         // If a left child exists, concatenate the current node's code to it. This assigns the '0' path.
         if (node->left)
@@ -216,7 +217,7 @@ int main(int argc, char *argv[])
     unsigned char bufferByte;
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
-    fwrite(&uniqueLetterCount, 1, 1, compressedFilePtr);
+    fwrite(&uniqueSymbolCount, 1, 1, compressedFilePtr);
     // Update the totalBitCount to include the 8 bits (1 byte) just written for the unique byte count.
     totalBitCount += 8;
 
@@ -230,7 +231,7 @@ int main(int argc, char *argv[])
     string transformationStrings[256];
 
     // Iterate through each node in the Huffman tree to write transformation codes to the compressed file.
-    for (TreeNode *node = nodesForHuffmanTree; node < nodesForHuffmanTree + uniqueLetterCount; node++)
+    for (TreeNode *node = nodesForHuffmanTree; node < nodesForHuffmanTree + uniqueSymbolCount; node++)
     {
         // Store the transformation string for the current character in the array.
         transformationStrings[node->character] = node->bit;
@@ -293,7 +294,7 @@ int main(int argc, char *argv[])
     // characters, represented by the root node of the Huffman tree. This reflects the
     // total number of characters processed during compression, providing a measure for
     // tracking compression progress.
-    PROGRESS.MAX = (nodesForHuffmanTree + uniqueLetterCount * 2 - 2)->occurances;
+    PROGRESS.MAX = (nodesForHuffmanTree + uniqueSymbolCount * 2 - 2)->occurances;
 
     originalFilePtr = fopen(argv[1], "rb");
     // Moving to the end of the file to determine its size.
