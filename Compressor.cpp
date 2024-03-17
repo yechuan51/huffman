@@ -152,116 +152,90 @@ int main(int argc, char *argv[])
     //---------------------------------------------
 
     //--------------------3------------------------
-    // creating the base of translation array(and then sorting them by ascending frequencies
-    // this array of type 'ersel' will not be used after calculating transformed versions of every unique byte
-    // instead its info will be written in a new string array called str_arr
-    TreeNode array[letter_count * 2 - 1];
-    TreeNode *e = array;
-    for (long int *i = occurances; i < occurances + 256; i++)
+    // Step 1: Initialize the leaf nodes for Huffman tree construction.
+    // Each leaf node represents a unique byte and its frequency in the input data.
+    TreeNode nodesForHuffmanTree[letter_count * 2 - 1];
+    TreeNode *currentNode = nodesForHuffmanTree;
+
+    // Step 2: Fill the array with data for each unique byte.
+    for (long int *frequency = occurances; frequency < occurances + 256; frequency++)
     {
-        if (*i)
+        if (*frequency)
         {
-            e->right = NULL;
-            e->left = NULL;
-            e->occurances = *i;
-            e->character = i - occurances;
-            e++;
+            currentNode->right = NULL;
+            currentNode->left = NULL;
+            currentNode->occurances = *frequency;
+            currentNode->character = frequency - occurances;
+            currentNode++;
         }
     }
-    sort(array, array + letter_count, TreeNodeCompare);
-    //---------------------------------------------
 
-    //-------------------4-------------------------
-    TreeNode *min1 = array;
-    TreeNode *min2 = array + 1;
-    TreeNode *current = array + letter_count;
-    TreeNode *internalNode = array + letter_count;
-    TreeNode *leafNode = array + 2;
+    // Step 3: Sort the leaf nodes based on frequency to prepare for tree construction.
+    // In ascending order.
+    sort(nodesForHuffmanTree, nodesForHuffmanTree + letter_count, TreeNodeCompare);
+
+    // Step 4: Construct the Huffman tree by merging nodes with the lowest frequencies.
+    TreeNode *smallestNode = nodesForHuffmanTree;
+    TreeNode *secondSmallestNode = nodesForHuffmanTree + 1;
+    TreeNode *newInternalNode = nodesForHuffmanTree + letter_count;
+    TreeNode *nextInternalNode = nodesForHuffmanTree + letter_count;
+    TreeNode *nextLeafNode = nodesForHuffmanTree + 2;
     for (int i = 0; i < letter_count - 1; i++)
     {
-        current->occurances = min1->occurances + min2->occurances;
-        current->left = min1;
-        current->right = min2;
-        min1->bit = "1";
-        min2->bit = "0";
-        current++;
+        // Create a new internal node that combines the two smallest nodes.
+        newInternalNode->occurances = smallestNode->occurances + secondSmallestNode->occurances;
+        newInternalNode->left = smallestNode;
+        newInternalNode->right = secondSmallestNode;
+        // Assign bits for tree navigation: '1' for the path to smallestNode,
+        // '0' for secondSmallestNode.
+        smallestNode->bit = "1";
+        secondSmallestNode->bit = "0";
+        newInternalNode++;
 
-        // Check if we have processed all leaf nodes
-        if (leafNode >= array + letter_count)
+        // Update smallestNode and secondSmallestNode for the next iteration.
+        if (nextLeafNode >= nodesForHuffmanTree + letter_count)
         {
-            // If all leaf nodes are processed, use the next available internal node
-            min1 = internalNode;
-            internalNode++;
+            // All leaf nodes have been processed; proceed with internal nodes.
+            smallestNode = nextInternalNode;
+            nextInternalNode++;
         }
         else
         {
-            // If there are still leaf nodes, compare the frequency of the current leaf node with the current internal node
-            if (leafNode->occurances < internalNode->occurances)
-            {
-                // If the leaf node's frequency is less, choose it for merging
-                min1 = leafNode;
-                leafNode++;
-            }
-            else
-            {
-                // If the internal node's frequency is less or equal, choose it for merging
-                min1 = internalNode;
-                internalNode++;
-            }
+            // Choose the next smallest node from the leaf or internal nodes.
+            smallestNode = (nextLeafNode->occurances < nextInternalNode->occurances) ? nextLeafNode++ : nextInternalNode++;
         }
 
-        if (leafNode >= array + letter_count)
+        // Repeat the process for secondSmallestNode.
+        if (nextLeafNode >= nodesForHuffmanTree + letter_count)
         {
-            // If all leaf nodes are processed, use the next available internal node
-            min2 = internalNode;
-            internalNode++;
+            secondSmallestNode = nextInternalNode;
+            nextInternalNode++;
         }
-        else if (internalNode >= current)
+        else if (nextInternalNode >= newInternalNode)
         {
-            // If all internal nodes up to 'current' are processed, use the next leaf node
-            min2 = leafNode;
-            leafNode++;
+            secondSmallestNode = nextLeafNode;
+            nextLeafNode++;
         }
         else
         {
-            // If there are both leaf and internal nodes available, compare to find the smaller frequency
-            if (leafNode->occurances < internalNode->occurances)
-            {
-                // If the leaf node's frequency is less, choose it for merging
-                min2 = leafNode;
-                leafNode++;
-            }
-            else
-            {
-                // If the internal node's frequency is less or equal, choose it for merging
-                min2 = internalNode;
-                internalNode++;
-            }
+            secondSmallestNode = (nextLeafNode->occurances < nextInternalNode->occurances) ? nextLeafNode++ : nextInternalNode++;
         }
     }
 
-    //---------------------------------------------
-
-    //-------------------5-------------------------
-    // Start from the last internal node (just before the root node) and move backwards through the array
-    for (e = array + letter_count * 2 - 2; e > array - 1; e--)
+    // Step 5: Assign Huffman codes to each node.
+    // Iterate from the last internal node to the root, building the Huffman codes in reverse.
+    for (TreeNode *node = nodesForHuffmanTree + letter_count * 2 - 2; node > nodesForHuffmanTree - 1; node--)
     {
-        // If the current node has a left child, prepend the current node's bit string to the left child's.
-        // This operation effectively assigns a '0' or '1' to the bit string, according to the child's position.
-        // Since we are moving from the bottom of the tree upwards, we are actually appending the path bits
-        // to each node's bit string, constructing the final encoded bit string in reverse.
-        if (e->left)
+        // If a left child exists, concatenate the current node's code to it. This assigns the '0' path.
+        if (node->left)
         {
-            e->left->bit = e->bit + e->left->bit;
+            node->left->bit = node->bit + node->left->bit;
         }
 
-        // Perform a similar operation for the right child, if present.
-        // This step ensures that each step towards a leaf node from the root
-        // is recorded as a series of bits ('0's for left moves and '1's for right moves),
-        // which collectively form the Huffman code for the character represented by the leaf.
-        if (e->right)
+        // Similar operation for the right child, representing the '1' path.
+        if (node->right)
         {
-            e->right->bit = e->bit + e->right->bit;
+            node->right->bit = node->bit + node->right->bit;
         }
     }
     //---------------------------------------------
@@ -291,11 +265,11 @@ int main(int argc, char *argv[])
     char *str_pointer;
     unsigned char len, current_character;
     string str_arr[256];
-    for (e = array; e < array + letter_count; e++)
+    for (currentNode = nodesForHuffmanTree; currentNode < nodesForHuffmanTree + letter_count; currentNode++)
     {
-        str_arr[(e->character)] = e->bit; // we are putting the transformation string to str_arr array to make the compression process more time efficient
-        len = e->bit.length();
-        current_character = e->character;
+        str_arr[(currentNode->character)] = currentNode->bit; // we are putting the transformation string to str_arr array to make the compression process more time efficient
+        len = currentNode->bit.length();
+        current_character = currentNode->character;
 
         write_from_uChar(current_character, current_byte, current_bit_count, compressed_fp);
         write_from_uChar(len, current_byte, current_bit_count, compressed_fp);
@@ -304,7 +278,7 @@ int main(int argc, char *argv[])
         // we re going to need to represent this specific byte's transformated version
         // after here we are going to write the transformed version of the number bit by bit.
 
-        str_pointer = &e->bit[0];
+        str_pointer = &currentNode->bit[0];
         while (*str_pointer)
         {
             if (current_bit_count == 8)
@@ -333,7 +307,7 @@ int main(int argc, char *argv[])
             str_pointer++;
         }
 
-        total_bits += len * (e->occurances);
+        total_bits += len * (currentNode->occurances);
     }
     if (total_bits % 8)
     {
@@ -366,7 +340,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    PROGRESS.MAX = (array + letter_count * 2 - 2)->occurances; // setting progress bar
+    PROGRESS.MAX = (nodesForHuffmanTree + letter_count * 2 - 2)->occurances; // setting progress bar
 
     //-------------writes fourth---------------
     write_file_count(argc - 1, current_byte, current_bit_count, compressed_fp);
