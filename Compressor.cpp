@@ -77,7 +77,7 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
 int main(int argc, char *argv[])
 {
     long int occurances[256];
-    long int total_bits = 0;
+    long int totalBitCount = 0;
     int letter_count = 0;
     if (argc == 1)
     {
@@ -90,8 +90,7 @@ int main(int argc, char *argv[])
         *i = 0;
     }
 
-    string scompressed;
-    FILE *original_fp, *compressed_fp;
+    FILE *originalFilePtr;
 
     for (int i = 1; i < argc; i++)
     { // checking for wrong input
@@ -100,24 +99,21 @@ int main(int argc, char *argv[])
             std::cout << "You cannot compress a directory" << endl;
             return 0;
         }
-        original_fp = fopen(argv[i], "rb");
-        if (!original_fp)
+        originalFilePtr = fopen(argv[i], "rb");
+        if (!originalFilePtr)
         {
             std::cout << argv[i] << " file does not exist" << endl
                       << "Process has been terminated" << endl;
             return 0;
         }
-        fclose(original_fp);
+        fclose(originalFilePtr);
     }
-
-    scompressed = argv[1];
-    scompressed += ".compressed";
 
     // Histograming the frequency of bytes.
     unsigned char *x_ptr, x; // these are temp variables to take input from the file
     x_ptr = &x;
     long int total_size = 0, size;
-    total_bits += 16 + 9 * (argc - 1);
+    totalBitCount += 16 + 9 * (argc - 1);
     for (int current_file = 1; current_file < argc; current_file++)
     {
         for (char *c = argv[current_file]; *c; c++)
@@ -127,18 +123,18 @@ int main(int argc, char *argv[])
 
         size = size_of_the_file(argv[current_file]);
         total_size += size;
-        total_bits += 64;
+        totalBitCount += 64;
 
         // "rb" is for reading binary files
-        original_fp = fopen(argv[current_file], "rb");
+        originalFilePtr = fopen(argv[current_file], "rb");
         // reading the first byte of the file into x.
-        fread(x_ptr, 1, 1, original_fp);
+        fread(x_ptr, 1, 1, originalFilePtr);
         for (long int i = 0; i < size; i++)
         { // counting usage frequency of unique bytes inside the file
             occurances[x]++;
-            fread(x_ptr, 1, 1, original_fp);
+            fread(x_ptr, 1, 1, originalFilePtr);
         }
-        fclose(original_fp);
+        fclose(originalFilePtr);
     }
 
     // Traverse through all possible bytes and count the number of unique bytes.
@@ -238,30 +234,21 @@ int main(int argc, char *argv[])
             node->right->bit = node->bit + node->right->bit;
         }
     }
-    //---------------------------------------------
 
-    compressed_fp = fopen(&scompressed[0], "wb");
-    int current_bit_count = 0;
-    unsigned char current_byte;
-    // Write the first piece of header information to the file: the letter count.
-    // This is the count of unique bytes (or characters) that have been encountered in the input.
-    // This count is crucial for reconstructing the Huffman tree when decompressing the file.
-    fwrite(&letter_count, 1, 1, compressed_fp);
-    // Update the total_bits variable to account for the 8 bits (1 byte) just written to the file.
-    // total_bits keeps track of the size of the compressed file in bits.
-    total_bits += 8;
-    //----------------------------------------
+    string scompressed = argv[1];
+    scompressed += ".compressed";
+    FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
 
-    //--------------writes second-------------
-
-    // Removed password functionality. Safe to ignore.
-    int check_password = 0;
-    fwrite(&check_password, 1, 1, compressed_fp);
-    total_bits += 8;
+    int bitCounter = 0;
+    unsigned char bufferByte;
+    // Writing the first piece of header information: the count of unique bytes.
+    // This count is essential for reconstructing the Huffman tree during the decompression process.
+    fwrite(&letter_count, 1, 1, compressedFilePtr);
+    // Update the totalBitCount to include the 8 bits (1 byte) just written for the unique byte count.
+    totalBitCount += 8;
 
     //----------------------------------------
 
-    //------------writes third---------------
     char *str_pointer;
     unsigned char len, current_character;
     string str_arr[256];
@@ -271,9 +258,9 @@ int main(int argc, char *argv[])
         len = currentNode->bit.length();
         current_character = currentNode->character;
 
-        write_from_uChar(current_character, current_byte, current_bit_count, compressed_fp);
-        write_from_uChar(len, current_byte, current_bit_count, compressed_fp);
-        total_bits += len + 16;
+        write_from_uChar(current_character, bufferByte, bitCounter, compressedFilePtr);
+        write_from_uChar(len, bufferByte, bitCounter, compressedFilePtr);
+        totalBitCount += len + 16;
         // above lines will write the byte and the number of bits
         // we re going to need to represent this specific byte's transformated version
         // after here we are going to write the transformed version of the number bit by bit.
@@ -281,37 +268,37 @@ int main(int argc, char *argv[])
         str_pointer = &currentNode->bit[0];
         while (*str_pointer)
         {
-            if (current_bit_count == 8)
+            if (bitCounter == 8)
             {
-                fwrite(&current_byte, 1, 1, compressed_fp);
-                current_bit_count = 0;
+                fwrite(&bufferByte, 1, 1, compressedFilePtr);
+                bitCounter = 0;
             }
             switch (*str_pointer)
             {
             case '1':
-                current_byte <<= 1;
-                current_byte |= 1;
-                current_bit_count++;
+                bufferByte <<= 1;
+                bufferByte |= 1;
+                bitCounter++;
                 break;
             case '0':
-                current_byte <<= 1;
-                current_bit_count++;
+                bufferByte <<= 1;
+                bitCounter++;
                 break;
             default:
                 cout << "An error has occurred" << endl
                      << "Compression process aborted" << endl;
-                fclose(compressed_fp);
+                fclose(compressedFilePtr);
                 remove(&scompressed[0]);
                 return 1;
             }
             str_pointer++;
         }
 
-        total_bits += len * (currentNode->occurances);
+        totalBitCount += len * (currentNode->occurances);
     }
-    if (total_bits % 8)
+    if (totalBitCount % 8)
     {
-        total_bits = (total_bits / 8 + 1) * 8;
+        totalBitCount = (totalBitCount / 8 + 1) * 8;
         // from this point on total bits doesnt represent total bits
         // instead it represents 8*number_of_bytes we are gonna use on our compressed file
     }
@@ -319,9 +306,9 @@ int main(int argc, char *argv[])
     //----------------------------------------
 
     cout << "The size of the sum of ORIGINAL files is: " << total_size << " bytes" << endl;
-    cout << "The size of the COMPRESSED file will be: " << total_bits / 8 << " bytes" << endl;
-    cout << "Compressed file's size will be [%" << 100 * ((float)total_bits / 8 / total_size) << "] of the original file" << endl;
-    if (total_bits / 8 > total_size)
+    cout << "The size of the COMPRESSED file will be: " << totalBitCount / 8 << " bytes" << endl;
+    cout << "Compressed file's size will be [%" << 100 * ((float)totalBitCount / 8 / total_size) << "] of the original file" << endl;
+    if (totalBitCount / 8 > total_size)
     {
         cout << endl
              << "COMPRESSED FILE'S SIZE WILL BE HIGHER THAN THE SUM OF ORIGINALS" << endl
@@ -335,7 +322,7 @@ int main(int argc, char *argv[])
     {
         cout << endl
              << "Process has been aborted" << endl;
-        fclose(compressed_fp);
+        fclose(compressedFilePtr);
         remove(&scompressed[0]);
         return 0;
     }
@@ -343,7 +330,7 @@ int main(int argc, char *argv[])
     PROGRESS.MAX = (nodesForHuffmanTree + letter_count * 2 - 2)->occurances; // setting progress bar
 
     //-------------writes fourth---------------
-    write_file_count(argc - 1, current_byte, current_bit_count, compressed_fp);
+    write_file_count(argc - 1, bufferByte, bitCounter, compressedFilePtr);
     //---------------------------------------
 
     for (int current_file = 1; current_file < argc; current_file++)
@@ -351,58 +338,58 @@ int main(int argc, char *argv[])
 
         if (this_is_not_a_folder(argv[current_file]))
         { // if current is a file and not a folder
-            original_fp = fopen(argv[current_file], "rb");
-            fseek(original_fp, 0, SEEK_END);
-            size = ftell(original_fp);
-            rewind(original_fp);
+            originalFilePtr = fopen(argv[current_file], "rb");
+            fseek(originalFilePtr, 0, SEEK_END);
+            size = ftell(originalFilePtr);
+            rewind(originalFilePtr);
 
             //-------------writes fifth--------------
-            if (current_bit_count == 8)
+            if (bitCounter == 8)
             {
-                fwrite(&current_byte, 1, 1, compressed_fp);
-                current_bit_count = 0;
+                fwrite(&bufferByte, 1, 1, compressedFilePtr);
+                bitCounter = 0;
             }
-            current_byte <<= 1;
-            current_byte |= 1;
-            current_bit_count++;
+            bufferByte <<= 1;
+            bufferByte |= 1;
+            bitCounter++;
             //---------------------------------------
 
-            write_file_size(size, current_byte, current_bit_count, compressed_fp);                              // writes sixth
-            write_file_name(argv[current_file], str_arr, current_byte, current_bit_count, compressed_fp);       // writes seventh
-            write_the_file_content(original_fp, size, str_arr, current_byte, current_bit_count, compressed_fp); // writes eighth
-            fclose(original_fp);
+            write_file_size(size, bufferByte, bitCounter, compressedFilePtr);                                  // writes sixth
+            write_file_name(argv[current_file], str_arr, bufferByte, bitCounter, compressedFilePtr);           // writes seventh
+            write_the_file_content(originalFilePtr, size, str_arr, bufferByte, bitCounter, compressedFilePtr); // writes eighth
+            fclose(originalFilePtr);
         }
         else
         { // if current is a folder instead
 
             //-------------writes fifth--------------
-            if (current_bit_count == 8)
+            if (bitCounter == 8)
             {
-                fwrite(&current_byte, 1, 1, compressed_fp);
-                current_bit_count = 0;
+                fwrite(&bufferByte, 1, 1, compressedFilePtr);
+                bitCounter = 0;
             }
-            current_byte <<= 1;
-            current_bit_count++;
+            bufferByte <<= 1;
+            bitCounter++;
             //---------------------------------------
 
-            write_file_name(argv[current_file], str_arr, current_byte, current_bit_count, compressed_fp); // writes seventh
+            write_file_name(argv[current_file], str_arr, bufferByte, bitCounter, compressedFilePtr); // writes seventh
 
             string folder_name = argv[current_file];
-            write_the_folder(folder_name, str_arr, current_byte, current_bit_count, compressed_fp);
+            write_the_folder(folder_name, str_arr, bufferByte, bitCounter, compressedFilePtr);
         }
     }
 
-    if (current_bit_count == 8)
+    if (bitCounter == 8)
     { // here we are writing the last byte of the file
-        fwrite(&current_byte, 1, 1, compressed_fp);
+        fwrite(&bufferByte, 1, 1, compressedFilePtr);
     }
     else
     {
-        current_byte <<= 8 - current_bit_count;
-        fwrite(&current_byte, 1, 1, compressed_fp);
+        bufferByte <<= 8 - bitCounter;
+        fwrite(&bufferByte, 1, 1, compressedFilePtr);
     }
 
-    fclose(compressed_fp);
+    fclose(compressedFilePtr);
     system("clear");
     cout << endl
          << "Created compressed file: " << scompressed << endl;
