@@ -264,7 +264,7 @@ int main(int argc, char *argv[])
                 bitCounter = 0;
             }
             if (*transformationStringPtr == '1')
-            { // OVER HERE!
+            {
                 bufferByte <<= 1;
                 bufferByte |= 1;
             }
@@ -319,9 +319,6 @@ int main(int argc, char *argv[])
         fwrite(&bufferByte, 1, 1, compressedFilePtr);
         bitCounter = 0;
     }
-    bufferByte <<= 1;
-    bufferByte |= 1;
-    bitCounter++;
 
     // Writing the size of the file, its name, and its content in the compressed format.
     write_file_size(size, bufferByte, bitCounter, compressedFilePtr);

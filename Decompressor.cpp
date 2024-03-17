@@ -106,17 +106,14 @@ int main(int argc, char *argv[])
     // File count was written to the compressed file from least significiant byte
     // to most significiant byte to make sure system's endianness
     // does not affect the process and that is why we are processing size information like this
-    // --------------------------------
-    if (this_is_a_file(bufferByte, bitCounter, compressedFile))
-    {
-        long int fileSize = read_file_size(bufferByte, bitCounter, compressedFile);
-        int fileNameLength = process_8_bits_NUMBER(bufferByte, bitCounter, compressedFile);
-        char newfileName[fileNameLength + 4];
-        write_file_name(newfileName, fileNameLength, bufferByte, bitCounter, root, compressedFile);
-        change_name_if_exists(newfileName);
 
-        translate_file(newfileName, fileSize, bufferByte, bitCounter, root, compressedFile);
-    }
+    long int fileSize = read_file_size(bufferByte, bitCounter, compressedFile);
+    int fileNameLength = process_8_bits_NUMBER(bufferByte, bitCounter, compressedFile);
+    char newfileName[fileNameLength + 4];
+    write_file_name(newfileName, fileNameLength, bufferByte, bitCounter, root, compressedFile);
+    change_name_if_exists(newfileName);
+
+    translate_file(newfileName, fileSize, bufferByte, bitCounter, root, compressedFile);
 
     fclose(compressedFile);
     burn_tree(root);
@@ -182,23 +179,6 @@ unsigned char process_8_bits_NUMBER(unsigned char &current_byte, int current_bit
     fread(&temp_byte, 1, 1, fp_read);
     val = current_byte | (temp_byte >> current_bit_count);
     current_byte = temp_byte << 8 - current_bit_count;
-    return val;
-}
-
-// checks if next input is either a file or a folder
-// returns 1 if it is a file
-// returns 0 if it is a folder
-bool this_is_a_file(unsigned char &current_byte, int &current_bit_count, FILE *fp_compressed)
-{
-    bool val;
-    if (current_bit_count == 0)
-    {
-        fread(&current_byte, 1, 1, fp_compressed);
-        current_bit_count = 8;
-    }
-    val = current_byte & check;
-    current_byte <<= 1;
-    current_bit_count--;
     return val;
 }
 
