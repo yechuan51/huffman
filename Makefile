@@ -1,10 +1,10 @@
 all : archive extract
 
-archive : Compressor.cpp
-	g++ -std=c++14 Compressor.cpp -o archive
+archive : Compressor.cu
+	nvcc -o archive Compressor.cu
 
-extract : Decompressor.cpp
-	g++ -std=c++14 Decompressor.cpp -o extract
+extract : Decompressor.cu
+	nvcc -o extract Decompressor.cu
 
 clean :
 	@rm -f archive
