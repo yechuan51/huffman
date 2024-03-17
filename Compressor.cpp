@@ -264,7 +264,7 @@ int main(int argc, char *argv[])
                 bitCounter = 0;
             }
             if (*transformationStringPtr == '1')
-            {
+            { // OVER HERE!
                 bufferByte <<= 1;
                 bufferByte |= 1;
             }
