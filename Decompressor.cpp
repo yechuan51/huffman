@@ -20,7 +20,6 @@ struct TranslationNode
 
 progress PROGRESS;
 
-bool this_is_a_file(unsigned char &, int &, FILE *);
 long int read_file_size(unsigned char &, int, FILE *);
 void write_file_name(char *, int, unsigned char &, int &, TranslationNode *, FILE *);
 void translate_file(char *, long int, unsigned char &, int &, TranslationNode *, FILE *);
@@ -38,20 +37,11 @@ void burn_tree(TranslationNode *);
     that is why we re going to translate it part by part
 
 .first (one byte)           ->  letter_count
-.second (bit group)
-    2.1 (one byte)          ->  password_length
-    2.2 (bytes)             ->  password (if password exists)
 .third (bit groups)
     3.1 (8 bits)            ->  current unique byte
     3.2 (8 bits)            ->  length of the transformation
     4.3 (bits)              ->  transformation code of that unique byte
-
-.fourth (2 bytes)**         ->  file_count
-    .fifth (1 bit)*         ->  file or folder information  ->  folder(0) file(1)
     .sixth (8 bytes)        ->  size of current file (IF FILE)
-    .seventh (bit group)
-        7.1 (8 bits)        ->  length of current file's or folder's name
-        7.2 (bits)          ->  translate and write current file's or folder's name
     .eighth (a lot of bits) ->  translate and write current file (IF FILE)
 
 *whenever we see a new folder we will write seventh then
@@ -113,8 +103,10 @@ int main(int argc, char *argv[])
     write_file_name(newfileName, fileNameLength, bufferByte, bitCounter, root, compressedFile);
     change_name_if_exists(newfileName);
 
+    // Translating and writing the file content based on the Huffman encoding.
     translate_file(newfileName, fileSize, bufferByte, bitCounter, root, compressedFile);
 
+    // Clean up.
     fclose(compressedFile);
     burn_tree(root);
     std::cout << "Decompression is complete" << endl;

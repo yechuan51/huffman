@@ -31,20 +31,11 @@ https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique
     Compressed File's structure had been documented below
 
 first (one byte)            ->  letter_count
-second (bit group)
-    2.1 (one byte)          ->  password_length
-    2.2 (bytes)             ->  password (if password exists)
 third (bit groups)
     3.1 (8 bits)            ->  current unique byte
     3.2 (8 bits)            ->  length of the transformation
     3.3 (bits)              ->  transformation code of that unique byte
-
-fourth (2 bytes)**          ->  file_count (inside the current folder)
-    fifth (1 bit)*          ->  file or folder information  ->  folder(0) file(1)
     sixth (8 bytes)         ->  size of current input_file (IF FILE)
-    seventh (bit group)
-        7.1 (8 bits)        ->  length of current input_file's or folder's name
-        7.2 (bits)          ->  transformed version of current input_file's or folder's name
     eighth (a lot of bits)  ->  transformed version of current input_file (IF FILE)
 
 *whenever we see a new folder we will write seventh then start writing from fourth to eighth
