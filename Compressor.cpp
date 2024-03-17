@@ -9,11 +9,11 @@
 
 using namespace std;
 
-void write_from_uChar(unsigned char, unsigned char &, int, FILE *);
-long int size_of_the_file(char *);
-void write_file_size(long int, unsigned char &, int, FILE *);
-void write_file_name(char *, string *, unsigned char &, int &, FILE *);
-void write_the_file_content(FILE *, long int, string *, unsigned char &, int &, FILE *);
+void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
+long int sizeOfTheFile(char *);
+void writeFileSize(long int, unsigned char &, int, FILE *);
+void writeFileName(char *, string *, unsigned char &, int &, FILE *);
+void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
 
 /*          CONTENT TABLE IN ORDER
 ---------PART 1-CALCULATING TRANSLATION INFO----------
@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
 {
     long int occurances[256];
     long int totalBitCount = 0;
-    int letter_count = 0;
+    int uniqueLetterCount = 0;
     if (argc != 2)
     {
         std::cout << "Must provide a single file name." << endl;
@@ -85,39 +85,37 @@ int main(int argc, char *argv[])
     fclose(originalFilePtr);
 
     // Histograming the frequency of bytes.
-    unsigned char *x_ptr, x; // these are temp variables to take input from the file
-    x_ptr = &x;
+    unsigned char *readBufPtr, readBuf;
+    readBufPtr = &readBuf;
     long int totalSize = 0, size;
     totalBitCount += 16 + 9 * (argc - 1);
-    for (int current_file = 1; current_file < argc; current_file++)
-    {
-        for (char *c = argv[current_file]; *c; c++)
-        { // counting usage frequency of unique bytes on the file name (or folder name)
-            occurances[(unsigned char)(*c)]++;
-        }
 
-        size = size_of_the_file(argv[current_file]);
-        totalSize += size;
-        totalBitCount += 64;
-
-        // "rb" is for reading binary files
-        originalFilePtr = fopen(argv[current_file], "rb");
-        // reading the first byte of the file into x.
-        fread(x_ptr, 1, 1, originalFilePtr);
-        for (long int i = 0; i < size; i++)
-        { // counting usage frequency of unique bytes inside the file
-            occurances[x]++;
-            fread(x_ptr, 1, 1, originalFilePtr);
-        }
-        fclose(originalFilePtr);
+    for (char *c = argv[1]; *c; c++)
+    { // counting usage frequency of unique bytes on the file name
+        occurances[(unsigned char)(*c)]++;
     }
+
+    size = sizeOfTheFile(argv[1]);
+    totalSize += size;
+    totalBitCount += 64;
+
+    // "rb" is for reading binary files
+    originalFilePtr = fopen(argv[1], "rb");
+    // reading the first byte of the file into x.
+    fread(readBufPtr, 1, 1, originalFilePtr);
+    for (long int i = 0; i < size; i++)
+    { // counting usage frequency of unique bytes inside the file
+        occurances[readBuf]++;
+        fread(readBufPtr, 1, 1, originalFilePtr);
+    }
+    fclose(originalFilePtr);
 
     // Traverse through all possible bytes and count the number of unique bytes.
     for (long int *i = occurances; i < occurances + 256; i++)
     {
         if (*i)
         {
-            letter_count++;
+            uniqueLetterCount++;
         }
     }
     //---------------------------------------------
@@ -125,7 +123,7 @@ int main(int argc, char *argv[])
     //--------------------3------------------------
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
     // Each leaf node represents a unique byte and its frequency in the input data.
-    TreeNode nodesForHuffmanTree[letter_count * 2 - 1];
+    TreeNode nodesForHuffmanTree[uniqueLetterCount * 2 - 1];
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
@@ -143,15 +141,15 @@ int main(int argc, char *argv[])
 
     // Step 3: Sort the leaf nodes based on frequency to prepare for tree construction.
     // In ascending order.
-    sort(nodesForHuffmanTree, nodesForHuffmanTree + letter_count, TreeNodeCompare);
+    sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueLetterCount, TreeNodeCompare);
 
     // Step 4: Construct the Huffman tree by merging nodes with the lowest frequencies.
     TreeNode *smallestNode = nodesForHuffmanTree;
     TreeNode *secondSmallestNode = nodesForHuffmanTree + 1;
-    TreeNode *newInternalNode = nodesForHuffmanTree + letter_count;
-    TreeNode *nextInternalNode = nodesForHuffmanTree + letter_count;
+    TreeNode *newInternalNode = nodesForHuffmanTree + uniqueLetterCount;
+    TreeNode *nextInternalNode = nodesForHuffmanTree + uniqueLetterCount;
     TreeNode *nextLeafNode = nodesForHuffmanTree + 2;
-    for (int i = 0; i < letter_count - 1; i++)
+    for (int i = 0; i < uniqueLetterCount - 1; i++)
     {
         // Create a new internal node that combines the two smallest nodes.
         newInternalNode->occurances = smallestNode->occurances + secondSmallestNode->occurances;
@@ -164,7 +162,7 @@ int main(int argc, char *argv[])
         newInternalNode++;
 
         // Update smallestNode and secondSmallestNode for the next iteration.
-        if (nextLeafNode >= nodesForHuffmanTree + letter_count)
+        if (nextLeafNode >= nodesForHuffmanTree + uniqueLetterCount)
         {
             // All leaf nodes have been processed; proceed with internal nodes.
             smallestNode = nextInternalNode;
@@ -177,7 +175,7 @@ int main(int argc, char *argv[])
         }
 
         // Repeat the process for secondSmallestNode.
-        if (nextLeafNode >= nodesForHuffmanTree + letter_count)
+        if (nextLeafNode >= nodesForHuffmanTree + uniqueLetterCount)
         {
             secondSmallestNode = nextInternalNode;
             nextInternalNode++;
@@ -195,7 +193,7 @@ int main(int argc, char *argv[])
 
     // Step 5: Assign Huffman codes to each node.
     // Iterate from the last internal node to the root, building the Huffman codes in reverse.
-    for (TreeNode *node = nodesForHuffmanTree + letter_count * 2 - 2; node > nodesForHuffmanTree - 1; node--)
+    for (TreeNode *node = nodesForHuffmanTree + uniqueLetterCount * 2 - 2; node > nodesForHuffmanTree - 1; node--)
     {
         // If a left child exists, concatenate the current node's code to it. This assigns the '0' path.
         if (node->left)
@@ -218,7 +216,7 @@ int main(int argc, char *argv[])
     unsigned char bufferByte;
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
-    fwrite(&letter_count, 1, 1, compressedFilePtr);
+    fwrite(&uniqueLetterCount, 1, 1, compressedFilePtr);
     // Update the totalBitCount to include the 8 bits (1 byte) just written for the unique byte count.
     totalBitCount += 8;
 
@@ -232,7 +230,7 @@ int main(int argc, char *argv[])
     string transformationStrings[256];
 
     // Iterate through each node in the Huffman tree to write transformation codes to the compressed file.
-    for (TreeNode *node = nodesForHuffmanTree; node < nodesForHuffmanTree + letter_count; node++)
+    for (TreeNode *node = nodesForHuffmanTree; node < nodesForHuffmanTree + uniqueLetterCount; node++)
     {
         // Store the transformation string for the current character in the array.
         transformationStrings[node->character] = node->bit;
@@ -240,8 +238,8 @@ int main(int argc, char *argv[])
         currentCharacter = node->character;
 
         // Write the current character and its transformation string length to the compressed file.
-        write_from_uChar(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
-        write_from_uChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
+        writeFromUChar(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
+        writeFromUChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
         // Updating the total bit count to include the bits for the character and its length.
         totalBitCount += transformationLength + 16;
 
@@ -295,7 +293,7 @@ int main(int argc, char *argv[])
     // characters, represented by the root node of the Huffman tree. This reflects the
     // total number of characters processed during compression, providing a measure for
     // tracking compression progress.
-    PROGRESS.MAX = (nodesForHuffmanTree + letter_count * 2 - 2)->occurances;
+    PROGRESS.MAX = (nodesForHuffmanTree + uniqueLetterCount * 2 - 2)->occurances;
 
     originalFilePtr = fopen(argv[1], "rb");
     // Moving to the end of the file to determine its size.
@@ -312,9 +310,9 @@ int main(int argc, char *argv[])
     }
 
     // Writing the size of the file, its name, and its content in the compressed format.
-    write_file_size(size, bufferByte, bitCounter, compressedFilePtr);
-    write_file_name(argv[1], transformationStrings, bufferByte, bitCounter, compressedFilePtr);
-    write_the_file_content(originalFilePtr, size, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
+    writeFileSize(size, bufferByte, bitCounter, compressedFilePtr);
+    writeFileName(argv[1], transformationStrings, bufferByte, bitCounter, compressedFilePtr);
+    writeFileContent(originalFilePtr, size, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
     fclose(originalFilePtr);
 
     // Ensuring the last byte is written to the compressed file by aligning the bit counter.
@@ -333,7 +331,7 @@ int main(int argc, char *argv[])
 // below function is used for writing the uChar to compressed file
 // It does not write it directly as one byte instead it mixes uChar and current byte, writes 8 bits of it
 // and puts the rest to curent byte for later use
-void write_from_uChar(unsigned char uChar, unsigned char &current_byte, int current_bit_count, FILE *fp_write)
+void writeFromUChar(unsigned char uChar, unsigned char &current_byte, int current_bit_count, FILE *fp_write)
 {
     current_byte <<= 8 - current_bit_count;
     current_byte |= (uChar >> current_bit_count);
@@ -343,20 +341,20 @@ void write_from_uChar(unsigned char uChar, unsigned char &current_byte, int curr
 
 // This function is writing byte count of current input file to compressed file using 8 bytes
 // It is done like this to make sure that it can work on little, big or middle-endian systems
-void write_file_size(long int size, unsigned char &current_byte, int current_bit_count, FILE *compressed_fp)
+void writeFileSize(long int size, unsigned char &current_byte, int current_bit_count, FILE *compressed_fp)
 {
     PROGRESS.next(size); // updating progress bar
     for (int i = 0; i < 8; i++)
     {
-        write_from_uChar(size % 256, current_byte, current_bit_count, compressed_fp);
+        writeFromUChar(size % 256, current_byte, current_bit_count, compressed_fp);
         size /= 256;
     }
 }
 
 // This function writes bytes that are translated from current input file's name to the compressed file.
-void write_file_name(char *file_name, string *str_arr, unsigned char &current_byte, int &current_bit_count, FILE *compressed_fp)
+void writeFileName(char *file_name, string *str_arr, unsigned char &current_byte, int &current_bit_count, FILE *compressed_fp)
 {
-    write_from_uChar(strlen(file_name), current_byte, current_bit_count, compressed_fp);
+    writeFromUChar(strlen(file_name), current_byte, current_bit_count, compressed_fp);
     char *str_pointer;
     for (char *c = file_name; *c; c++)
     {
@@ -390,7 +388,7 @@ void write_file_name(char *file_name, string *str_arr, unsigned char &current_by
 }
 
 // Below function translates and writes bytes from current input file to the compressed file.
-void write_the_file_content(FILE *original_fp, long int size, string *str_arr, unsigned char &current_byte, int &current_bit_count, FILE *compressed_fp)
+void writeFileContent(FILE *original_fp, long int size, string *str_arr, unsigned char &current_byte, int &current_bit_count, FILE *compressed_fp)
 {
     unsigned char *x_p, x;
     x_p = &x;
@@ -428,7 +426,7 @@ void write_the_file_content(FILE *original_fp, long int size, string *str_arr, u
     }
 }
 
-long int size_of_the_file(char *path)
+long int sizeOfTheFile(char *path)
 {
     long int size;
     FILE *fp = fopen(path, "rb");
