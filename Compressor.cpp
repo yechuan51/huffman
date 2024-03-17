@@ -81,8 +81,8 @@ int main(int argc, char *argv[])
     int letter_count = 0;
     if (argc == 1)
     {
-        cout << "Missing file name" << endl
-             << "try './archive {{file_name}}'" << endl;
+        std::cout << "Missing file name" << endl
+                  << "try './archive {{file_name}}'" << endl;
         return 0;
     }
     for (long int *i = occurances; i < occurances + 256; i++)
@@ -304,16 +304,16 @@ int main(int argc, char *argv[])
     // This loop processes the Huffman tree nodes, writing their associated transformation scripts to the compressed file.
     //----------------------------------------
 
-    cout << "The size of the sum of ORIGINAL files is: " << totalSize << " bytes" << endl;
-    cout << "The size of the COMPRESSED file will be: " << totalBitCount / 8 << " bytes" << endl;
+    std::cout << "The size of the sum of ORIGINAL files is: " << totalSize << " bytes" << endl;
+    std::cout << "The size of the COMPRESSED file will be: " << totalBitCount / 8 << " bytes" << endl;
 
     float compressionRatio = 100.0f * static_cast<float>(totalBitCount) / 8.0f / static_cast<float>(totalSize);
-    cout << "Compressed file's size will be approximately [" << compressionRatio << "%] of the original files." << endl;
+    std::cout << "Compressed file's size will be approximately [" << compressionRatio << "%] of the original files." << endl;
 
     // Warning if the compressed file is unexpectedly larger than the original sum.
     if (totalBitCount / 8 > totalSize)
     {
-        cout << "\nWARNING: The compressed file's size is larger than the sum of the originals.\n\n";
+        std::cout << "\nWARNING: The compressed file's size is larger than the sum of the originals.\n\n";
     }
 
     // Setting the progress bar's maximum value to the total occurrences of all
@@ -324,69 +324,43 @@ int main(int argc, char *argv[])
 
     // Writing the total count of files to be compressed to the header of the
     // compressed file.
-    write_file_count(argc - 1, bufferByte, bitCounter, compressedFilePtr);
+    write_file_count(1, bufferByte, bitCounter, compressedFilePtr);
     //---------------------------------------
 
-    for (int current_file = 1; current_file < argc; current_file++)
-    {
+    originalFilePtr = fopen(argv[1], "rb");
+    // Moving to the end of the file to determine its size.
+    fseek(originalFilePtr, 0, SEEK_END);
+    size = ftell(originalFilePtr);
+    // Rewinding to the start of the file to read from the beginning.
+    rewind(originalFilePtr);
 
-        if (this_is_not_a_folder(argv[current_file]))
-        { // if current is a file and not a folder
-            originalFilePtr = fopen(argv[current_file], "rb");
-            fseek(originalFilePtr, 0, SEEK_END);
-            size = ftell(originalFilePtr);
-            rewind(originalFilePtr);
-
-            //-------------writes fifth--------------
-            if (bitCounter == 8)
-            {
-                fwrite(&bufferByte, 1, 1, compressedFilePtr);
-                bitCounter = 0;
-            }
-            bufferByte <<= 1;
-            bufferByte |= 1;
-            bitCounter++;
-            //---------------------------------------
-
-            write_file_size(size, bufferByte, bitCounter, compressedFilePtr);                                                // writes sixth
-            write_file_name(argv[current_file], transformationStrings, bufferByte, bitCounter, compressedFilePtr);           // writes seventh
-            write_the_file_content(originalFilePtr, size, transformationStrings, bufferByte, bitCounter, compressedFilePtr); // writes eighth
-            fclose(originalFilePtr);
-        }
-        else
-        { // if current is a folder instead
-
-            //-------------writes fifth--------------
-            if (bitCounter == 8)
-            {
-                fwrite(&bufferByte, 1, 1, compressedFilePtr);
-                bitCounter = 0;
-            }
-            bufferByte <<= 1;
-            bitCounter++;
-            //---------------------------------------
-
-            write_file_name(argv[current_file], transformationStrings, bufferByte, bitCounter, compressedFilePtr); // writes seventh
-
-            string folder_name = argv[current_file];
-            write_the_folder(folder_name, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
-        }
-    }
-
+    // Handling bit alignment before writing file information.
     if (bitCounter == 8)
-    { // here we are writing the last byte of the file
-        fwrite(&bufferByte, 1, 1, compressedFilePtr);
-    }
-    else
     {
-        bufferByte <<= 8 - bitCounter;
+        fwrite(&bufferByte, 1, 1, compressedFilePtr);
+        bitCounter = 0;
+    }
+    bufferByte <<= 1;
+    bufferByte |= 1;
+    bitCounter++;
+
+    // Writing the size of the file, its name, and its content in the compressed format.
+    write_file_size(size, bufferByte, bitCounter, compressedFilePtr);
+    write_file_name(argv[1], transformationStrings, bufferByte, bitCounter, compressedFilePtr);
+    write_the_file_content(originalFilePtr, size, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
+    fclose(originalFilePtr);
+
+    // Ensuring the last byte is written to the compressed file by aligning the bit counter.
+    if (bitCounter > 0)
+    {
+        bufferByte <<= (8 - bitCounter);
         fwrite(&bufferByte, 1, 1, compressedFilePtr);
     }
 
     fclose(compressedFilePtr);
-    cout << endl
-         << "Created compressed file: " << scompressed << endl;
-    cout << "Compression is complete" << endl;
+    std::cout << endl
+              << "Created compressed file: " << scompressed << endl;
+    std::cout << "Compression is complete" << endl;
 }
 
 // below function is used for writing the uChar to compressed file
@@ -596,7 +570,7 @@ void write_the_folder(string path, string *str_arr, unsigned char &current_byte,
         file_count++;
     }
     rewinddir(dir);
-    write_file_count(file_count, current_byte, current_bit_count, compressed_fp); // writes fourth
+    write_file_count(file_count, current_byte, current_bit_count, compressed_fp);
 
     while ((current = readdir(dir)))
     { // if current is a file
