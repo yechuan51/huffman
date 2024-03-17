@@ -10,16 +10,11 @@
 using namespace std;
 
 void write_from_uChar(unsigned char, unsigned char &, int, FILE *);
-
-int this_is_not_a_folder(char *);
 long int size_of_the_file(char *);
-void count_in_folder(string, long int *, long int &, long int &);
-
 void write_file_count(int, unsigned char &, int, FILE *);
 void write_file_size(long int, unsigned char &, int, FILE *);
 void write_file_name(char *, string *, unsigned char &, int &, FILE *);
 void write_the_file_content(FILE *, long int, string *, unsigned char &, int &, FILE *);
-void write_the_folder(string, string *, unsigned char &, int &, FILE *);
 
 /*          CONTENT TABLE IN ORDER
 ---------PART 1-CALCULATING TRANSLATION INFO----------
@@ -79,10 +74,9 @@ int main(int argc, char *argv[])
     long int occurances[256];
     long int totalBitCount = 0;
     int letter_count = 0;
-    if (argc == 1)
+    if (argc != 2)
     {
-        std::cout << "Missing file name" << endl
-                  << "try './archive {{file_name}}'" << endl;
+        std::cout << "Must provide a single file name." << endl;
         return 0;
     }
     for (long int *i = occurances; i < occurances + 256; i++)
@@ -91,23 +85,14 @@ int main(int argc, char *argv[])
     }
 
     FILE *originalFilePtr;
-
-    for (int i = 1; i < argc; i++)
-    { // checking for wrong input
-        if (!this_is_not_a_folder(argv[i]))
-        {
-            std::cout << "You cannot compress a directory" << endl;
-            return 0;
-        }
-        originalFilePtr = fopen(argv[i], "rb");
-        if (!originalFilePtr)
-        {
-            std::cout << argv[i] << " file does not exist" << endl
-                      << "Process has been terminated" << endl;
-            return 0;
-        }
-        fclose(originalFilePtr);
+    originalFilePtr = fopen(argv[1], "rb");
+    if (!originalFilePtr)
+    {
+        std::cout << argv[1] << " file does not exist" << endl
+                  << "Process has been terminated" << endl;
+        return 0;
     }
+    fclose(originalFilePtr);
 
     // Histograming the frequency of bytes.
     unsigned char *x_ptr, x; // these are temp variables to take input from the file
@@ -471,17 +456,6 @@ void write_the_file_content(FILE *original_fp, long int size, string *str_arr, u
     }
 }
 
-int this_is_not_a_folder(char *path)
-{
-    DIR *temp = opendir(path);
-    if (temp)
-    {
-        closedir(temp);
-        return 0;
-    }
-    return 1;
-}
-
 long int size_of_the_file(char *path)
 {
     long int size;
@@ -490,140 +464,4 @@ long int size_of_the_file(char *path)
     size = ftell(fp);
     fclose(fp);
     return size;
-}
-
-// This function counts usage frequency of bytes inside a folder
-// only give folder path as input
-void count_in_folder(string path, long int *number, long int &total_size, long int &total_bits)
-{
-    FILE *original_fp;
-    path += '/';
-    DIR *dir = opendir(&path[0]), *next_dir;
-    string next_path;
-    total_size += 4096;
-    total_bits += 16; // for file_count
-    struct dirent *current;
-    while ((current = readdir(dir)))
-    {
-        if (current->d_name[0] == '.')
-        {
-            if (current->d_name[1] == 0)
-                continue;
-            if (current->d_name[1] == '.' && current->d_name[2] == 0)
-                continue;
-        }
-        total_bits += 9;
-
-        for (char *c = current->d_name; *c; c++)
-        { // counting usage frequency of bytes on the file name (or folder name)
-            number[(unsigned char)(*c)]++;
-        }
-
-        next_path = path + current->d_name;
-
-        if ((next_dir = opendir(&next_path[0])))
-        {
-            closedir(next_dir);
-            count_in_folder(next_path, number, total_size, total_bits);
-        }
-        else
-        {
-            long int size;
-            unsigned char *x_p, x;
-            x_p = &x;
-            total_size += size = size_of_the_file(&next_path[0]);
-            total_bits += 64;
-
-            //--------------------2------------------------
-            original_fp = fopen(&next_path[0], "rb");
-
-            fread(x_p, 1, 1, original_fp);
-            for (long int j = 0; j < size; j++)
-            { // counting usage frequency of bytes inside the file
-                number[x]++;
-                fread(x_p, 1, 1, original_fp);
-            }
-            fclose(original_fp);
-        }
-    }
-    closedir(dir);
-}
-
-void write_the_folder(string path, string *str_arr, unsigned char &current_byte, int &current_bit_count, FILE *compressed_fp)
-{
-    FILE *original_fp;
-    path += '/';
-    DIR *dir = opendir(&path[0]), *next_dir;
-    string next_path;
-    struct dirent *current;
-    int file_count = 0;
-    long int size;
-    while ((current = readdir(dir)))
-    {
-        if (current->d_name[0] == '.')
-        {
-            if (current->d_name[1] == 0)
-                continue;
-            if (current->d_name[1] == '.' && current->d_name[2] == 0)
-                continue;
-        }
-        file_count++;
-    }
-    rewinddir(dir);
-    write_file_count(file_count, current_byte, current_bit_count, compressed_fp);
-
-    while ((current = readdir(dir)))
-    { // if current is a file
-        if (current->d_name[0] == '.')
-        {
-            if (current->d_name[1] == 0)
-                continue;
-            if (current->d_name[1] == '.' && current->d_name[2] == 0)
-                continue;
-        }
-
-        next_path = path + current->d_name;
-        if (this_is_not_a_folder(&next_path[0]))
-        {
-
-            original_fp = fopen(&next_path[0], "rb");
-            fseek(original_fp, 0, SEEK_END);
-            size = ftell(original_fp);
-            rewind(original_fp);
-
-            //-------------writes fifth--------------
-            if (current_bit_count == 8)
-            {
-                fwrite(&current_byte, 1, 1, compressed_fp);
-                current_bit_count = 0;
-            }
-            current_byte <<= 1;
-            current_byte |= 1;
-            current_bit_count++;
-            //---------------------------------------
-
-            write_file_size(size, current_byte, current_bit_count, compressed_fp);                              // writes sixth
-            write_file_name(current->d_name, str_arr, current_byte, current_bit_count, compressed_fp);          // writes seventh
-            write_the_file_content(original_fp, size, str_arr, current_byte, current_bit_count, compressed_fp); // writes eighth
-            fclose(original_fp);
-        }
-        else
-        { // if current is a folder
-
-            //-------------writes fifth--------------
-            if (current_bit_count == 8)
-            {
-                fwrite(&current_byte, 1, 1, compressed_fp);
-                current_bit_count = 0;
-            }
-            current_byte <<= 1;
-            current_bit_count++;
-            //---------------------------------------
-
-            write_file_name(current->d_name, str_arr, current_byte, current_bit_count, compressed_fp); // writes seventh
-
-            write_the_folder(next_path, str_arr, current_byte, current_bit_count, compressed_fp);
-        }
-    }
-    closedir(dir);
 }

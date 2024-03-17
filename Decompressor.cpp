@@ -24,7 +24,6 @@ bool this_is_a_file(unsigned char &, int &, FILE *);
 long int read_file_size(unsigned char &, int, FILE *);
 void write_file_name(char *, int, unsigned char &, int &, translation *, FILE *);
 void translate_file(char *, long int, unsigned char &, int &, translation *, FILE *);
-void translate_folder(string, unsigned char &, int &, FILE *, translation *);
 
 unsigned char process_8_bits_NUMBER(unsigned char &, int, FILE *);
 void process_n_bits_TO_STRING(unsigned char &, int, int &, FILE *, translation *, unsigned char);
@@ -114,85 +113,24 @@ int main(int argc, char *argv[])
     // does not affect the process and that is why we are processing size information like this
     // --------------------------------
 
-    for (int current_file = 0; current_file < file_count; current_file++)
-    {
+    if (this_is_a_file(current_byte, current_bit_count, fp_compressed))
+    { // reads .fifth and goes inside if this is a file
 
-        if (this_is_a_file(current_byte, current_bit_count, fp_compressed))
-        { // reads .fifth and goes inside if this is a file
+        long int size = read_file_size(current_byte, current_bit_count, fp_compressed); // reads .sixth
 
-            long int size = read_file_size(current_byte, current_bit_count, fp_compressed); // reads .sixth
+        //---------------translates .seventh---------------------
+        int file_name_length = process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
+        char newfile[file_name_length + 4];
+        write_file_name(newfile, file_name_length, current_byte, current_bit_count, root, fp_compressed);
+        change_name_if_exists(newfile);
+        //--------------------------------------------------
 
-            //---------------translates .seventh---------------------
-            int file_name_length = process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
-            char newfile[file_name_length + 4];
-            write_file_name(newfile, file_name_length, current_byte, current_bit_count, root, fp_compressed);
-            change_name_if_exists(newfile);
-            //--------------------------------------------------
-
-            translate_file(newfile, size, current_byte, current_bit_count, root, fp_compressed); // translates .eighth
-        }
-        else
-        { // if this is a folder
-            //---------------translates .seventh---------------------
-            int file_name_length = process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
-            char newfile[file_name_length + 4];
-            write_file_name(newfile, file_name_length, current_byte, current_bit_count, root, fp_compressed);
-            change_name_if_exists(newfile);
-            //--------------------------------------------------
-            mkdir(newfile, 0755);
-            string folder_name = newfile;
-            translate_folder(folder_name, current_byte, current_bit_count, fp_compressed, root);
-        }
+        translate_file(newfile, size, current_byte, current_bit_count, root, fp_compressed); // translates .eighth
     }
 
     fclose(fp_compressed);
     burn_tree(root);
     cout << "Decompression is complete" << endl;
-}
-
-// translate_folder function is used for creating files and folders inside given path
-// by using information from the compressed file.
-// whenever it creates another file it will recursively call itself with path of the newly created file
-// and in this way translates the compressed file.
-void translate_folder(string path, unsigned char &current_byte, int &current_bit_count, FILE *fp_compressed, translation *root)
-{
-    path += '/';
-    string new_path;
-
-    // ---------reads .fourth----------
-    // reads how many folders/files the program will create inside the current folder
-    int file_count;
-    file_count = process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
-    file_count += 256 * process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
-    // --------------------------------
-
-    for (int current_file = 0; current_file < file_count; current_file++)
-    {
-        if (this_is_a_file(current_byte, current_bit_count, fp_compressed))
-        {                                                                                   // checks .fifth
-            long int size = read_file_size(current_byte, current_bit_count, fp_compressed); // reads .sixth
-
-            //---------------translates .seventh---------------------
-            int file_name_length = process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
-            char newfile[file_name_length + 4];
-            write_file_name(newfile, file_name_length, current_byte, current_bit_count, root, fp_compressed);
-            //--------------------------------------------------
-
-            new_path = path + newfile;
-            translate_file(&new_path[0], size, current_byte, current_bit_count, root, fp_compressed); // translates .eighth
-        }
-        else
-        { // if this is a folder
-            //---------------translates .seventh---------------------
-            int file_name_length = process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
-            char newfile[file_name_length + 4];
-            write_file_name(newfile, file_name_length, current_byte, current_bit_count, root, fp_compressed);
-            //--------------------------------------------------
-            new_path = path + newfile;
-            mkdir(&new_path[0], 0755);
-            translate_folder(new_path, current_byte, current_bit_count, fp_compressed, root);
-        }
-    }
 }
 
 // burn_tree function is used for deallocating translation tree
