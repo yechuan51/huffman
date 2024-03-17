@@ -103,11 +103,6 @@ int main(int argc, char *argv[])
     }
     //--------------------------------------------------
 
-    // ---------reads .fourth----------
-    // reads how many folders/files the program is going to create inside the main folder
-    int file_count;
-    file_count = process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
-    file_count += 256 * process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed);
     // File count was written to the compressed file from least significiant byte
     // to most significiant byte to make sure system's endianness
     // does not affect the process and that is why we are processing size information like this

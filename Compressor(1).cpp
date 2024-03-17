@@ -11,6 +11,7 @@ using namespace std;
 
 void write_from_uChar(unsigned char, unsigned char &, int, FILE *);
 long int size_of_the_file(char *);
+void write_file_count(int, unsigned char &, int, FILE *);
 void write_file_size(long int, unsigned char &, int, FILE *);
 void write_file_name(char *, string *, unsigned char &, int &, FILE *);
 void write_the_file_content(FILE *, long int, string *, unsigned char &, int &, FILE *);
@@ -306,6 +307,11 @@ int main(int argc, char *argv[])
     // tracking compression progress.
     PROGRESS.MAX = (nodesForHuffmanTree + letter_count * 2 - 2)->occurances;
 
+    // Writing the total count of files to be compressed to the header of the
+    // compressed file.
+    // write_file_count(1, bufferByte, bitCounter, compressedFilePtr);
+    //---------------------------------------
+
     originalFilePtr = fopen(argv[1], "rb");
     // Moving to the end of the file to determine its size.
     fseek(originalFilePtr, 0, SEEK_END);
@@ -351,6 +357,16 @@ void write_from_uChar(unsigned char uChar, unsigned char &current_byte, int curr
     current_byte |= (uChar >> current_bit_count);
     fwrite(&current_byte, 1, 1, fp_write);
     current_byte = uChar;
+}
+
+// below function is writing number of files we re going to translate inside current folder to compressed file's 2 bytes
+// It is done like this to make sure that it can work on little, big or middle-endian systems
+void write_file_count(int file_count, unsigned char &current_byte, int current_bit_count, FILE *compressed_fp)
+{
+    unsigned char temp = file_count % 256;
+    write_from_uChar(temp, current_byte, current_bit_count, compressed_fp);
+    temp = file_count / 256;
+    write_from_uChar(temp, current_byte, current_bit_count, compressed_fp);
 }
 
 // This function is writing byte count of current input file to compressed file using 8 bytes
