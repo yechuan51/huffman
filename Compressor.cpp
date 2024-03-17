@@ -61,7 +61,7 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
 
 int main(int argc, char *argv[])
 {
-    long int occurances[256];
+    long int occurances[256] = {0};
     // totalBitCount only tracks the number of bits that's going to be written to the compressed file.
     long int totalBitCount = 0;
     int uniqueSymbolCount = 0;
@@ -69,10 +69,6 @@ int main(int argc, char *argv[])
     {
         std::cout << "Must provide a single file name." << endl;
         return 0;
-    }
-    for (long int *i = occurances; i < occurances + 256; i++)
-    {
-        *i = 0;
     }
 
     FILE *originalFilePtr;
