@@ -62,8 +62,6 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
 int main(int argc, char *argv[])
 {
     long int occurances[256] = {0};
-    // totalBitCount only tracks the number of bits that's going to be written to the compressed file.
-    long int totalBitCount = 0;
     int uniqueSymbolCount = 0;
     if (argc != 2)
     {
@@ -85,7 +83,6 @@ int main(int argc, char *argv[])
     unsigned char *readBufPtr, readBuf;
     readBufPtr = &readBuf;
     long int totalSize = 0, size;
-    totalBitCount += 16 + 8;
 
     for (char *c = argv[1]; *c; c++)
     { // counting usage frequency of unique bytes on the file name
@@ -94,7 +91,6 @@ int main(int argc, char *argv[])
 
     size = sizeOfTheFile(argv[1]);
     totalSize += size;
-    totalBitCount += 64;
 
     // "rb" is for reading binary files
     originalFilePtr = fopen(argv[1], "rb");
@@ -214,8 +210,6 @@ int main(int argc, char *argv[])
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
     fwrite(&uniqueSymbolCount, 1, 1, compressedFilePtr);
-    // Update the totalBitCount to include the 8 bits (1 byte) just written for the unique byte count.
-    totalBitCount += 8;
 
     //----------------------------------------
 
@@ -237,8 +231,6 @@ int main(int argc, char *argv[])
         // Write the current character and its transformation string length to the compressed file.
         writeFromUChar(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
         writeFromUChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
-        // Updating the total bit count to include the bits for the character and its length.
-        totalBitCount += transformationLength + 16;
 
         // Write the transformation string bit by bit to the compressed file.
         transformationStringPtr = &node->bit[0];
@@ -261,30 +253,12 @@ int main(int argc, char *argv[])
             bitCounter++;
             transformationStringPtr++;
         }
-
-        // Adjust the total bit count based on the occurrences of the current character.
-        totalBitCount += transformationLength * (node->occurances);
     }
 
-    // Adjust the total bit count to be a multiple of 8, ensuring it represents the total number of bytes used.
-    if (totalBitCount % 8)
-    {
-        totalBitCount = (totalBitCount / 8 + 1) * 8;
-    }
     // This loop processes the Huffman tree nodes, writing their associated transformation scripts to the compressed file.
     //----------------------------------------
 
     std::cout << "The size of the sum of ORIGINAL files is: " << totalSize << " bytes" << endl;
-    std::cout << "The size of the COMPRESSED file will be: " << totalBitCount / 8 << " bytes" << endl;
-
-    float compressionRatio = 100.0f * static_cast<float>(totalBitCount) / 8.0f / static_cast<float>(totalSize);
-    std::cout << "Compressed file's size will be approximately [" << compressionRatio << "%] of the original files." << endl;
-
-    // Warning if the compressed file is unexpectedly larger than the original sum.
-    if (totalBitCount / 8 > totalSize)
-    {
-        std::cout << "\nWARNING: The compressed file's size is larger than the sum of the originals.\n\n";
-    }
 
     // Setting the progress bar's maximum value to the total occurrences of all
     // characters, represented by the root node of the Huffman tree. This reflects the
@@ -320,6 +294,21 @@ int main(int argc, char *argv[])
     }
 
     fclose(compressedFilePtr);
+
+    // Get the size of compressed file.
+    long int compressedFileSize = sizeOfTheFile(&scompressed[0]);
+    std::cout << "The size of the COMPRESSED file is: " << compressedFileSize << " bytes" << endl;
+
+    // Calculate the compression ratio.
+    float compressionRatio = 100.0f * static_cast<float>(compressedFileSize) / static_cast<float>(totalSize);
+    std::cout << "Compressed file's size is [" << compressionRatio << "%] of the original files." << endl;
+
+    // Warning if the compressed file is unexpectedly larger than the original sum.
+    if (compressedFileSize > totalSize)
+    {
+        std::cout << "\nWARNING: The compressed file's size is larger than the sum of the originals.\n\n";
+    }
+
     std::cout << endl
               << "Created compressed file: " << scompressed << endl;
     std::cout << "Compression is complete" << endl;
