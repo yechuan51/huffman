@@ -13,7 +13,6 @@ using namespace std;
 void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
 long int sizeOfTheFile(char *);
 void writeFileSize(long int, unsigned char &, int, FILE *);
-void writeFileName(char *, string *, unsigned char &, int &, FILE *);
 void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
 
 progress PROGRESS;
@@ -56,10 +55,10 @@ int main(int argc, char *argv[])
     readBufPtr = &readBuf;
     long int originalFileSize = 0;
 
-    for (char *c = argv[1]; *c; c++)
-    { // counting usage frequency of unique bytes on the file name
-        freqCount[(unsigned char)(*c)]++;
-    }
+    // for (char *c = argv[1]; *c; c++)
+    // { // counting usage frequency of unique bytes on the file name
+    //     freqCount[(unsigned char)(*c)]++;
+    // }
 
     originalFileSize = sizeOfTheFile(argv[1]);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
@@ -244,7 +243,6 @@ int main(int argc, char *argv[])
 
     // Writing the size of the file, its name, and its content in the compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
-    writeFileName(argv[1], transformationStrings, bufferByte, bitCounter, compressedFilePtr);
     writeFileContent(originalFilePtr, originalFileSize, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
     fclose(originalFilePtr);
 
@@ -296,42 +294,6 @@ void writeFileSize(long int size, unsigned char &current_byte, int current_bit_c
     {
         writeFromUChar(size % 256, current_byte, current_bit_count, compressed_fp);
         size /= 256;
-    }
-}
-
-// This function writes bytes that are translated from current input file's name to the compressed file.
-void writeFileName(char *file_name, string *str_arr, unsigned char &current_byte, int &current_bit_count, FILE *compressed_fp)
-{
-    writeFromUChar(strlen(file_name), current_byte, current_bit_count, compressed_fp);
-    char *str_pointer;
-    for (char *c = file_name; *c; c++)
-    {
-        str_pointer = &str_arr[(unsigned char)(*c)][0];
-        while (*str_pointer)
-        {
-            if (current_bit_count == 8)
-            {
-                fwrite(&current_byte, 1, 1, compressed_fp);
-                current_bit_count = 0;
-            }
-            switch (*str_pointer)
-            {
-            case '1':
-                current_byte <<= 1;
-                current_byte |= 1;
-                current_bit_count++;
-                break;
-            case '0':
-                current_byte <<= 1;
-                current_bit_count++;
-                break;
-            default:
-                cout << "An error has occurred" << endl
-                     << "Process has been aborted";
-                exit(2);
-            }
-            str_pointer++;
-        }
     }
 }
 

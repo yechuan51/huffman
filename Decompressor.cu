@@ -21,7 +21,6 @@ struct TranslationNode
 progress PROGRESS;
 
 long int read_file_size(unsigned char &, int, FILE *);
-void write_file_name(char *, int, unsigned char &, int &, TranslationNode *, FILE *);
 void translate_file(char *, long int, unsigned char &, int &, TranslationNode *, FILE *);
 
 unsigned char process_8_bits_NUMBER(unsigned char &, int, FILE *);
@@ -98,13 +97,11 @@ int main(int argc, char *argv[])
     // does not affect the process and that is why we are processing size information like this
 
     long int fileSize = read_file_size(bufferByte, bitCounter, compressedFile);
-    int fileNameLength = process_8_bits_NUMBER(bufferByte, bitCounter, compressedFile);
-    char newfileName[fileNameLength + 4];
-    write_file_name(newfileName, fileNameLength, bufferByte, bitCounter, root, compressedFile);
-    change_name_if_exists(newfileName);
+    string newfileName = "DECOMPRESSED_FILE";
+    change_name_if_exists(&newfileName[0]);
 
     // Translating and writing the file content based on the Huffman encoding.
-    translate_file(newfileName, fileSize, bufferByte, bitCounter, root, compressedFile);
+    translate_file(&newfileName[0], fileSize, bufferByte, bitCounter, root, compressedFile);
 
     // Clean up.
     fclose(compressedFile);
@@ -248,36 +245,6 @@ long int read_file_size(unsigned char &current_byte, int current_bit_count, FILE
     // Size was written to the compressed file from least significiant byte
     // to the most significiant byte to make sure system's endianness
     // does not affect the process and that is why we are processing size information like this
-}
-
-// Decodes current file's name and writes file name to newfile char array
-void write_file_name(char *newfile, int file_name_length, unsigned char &current_byte, int &current_bit_count, TranslationNode *root, FILE *fp_compressed)
-{
-    TranslationNode *node;
-    newfile[file_name_length] = 0;
-    for (int i = 0; i < file_name_length; i++)
-    {
-        node = root;
-        while (node->zero || node->one)
-        {
-            if (current_bit_count == 0)
-            {
-                fread(&current_byte, 1, 1, fp_compressed);
-                current_bit_count = 8;
-            }
-            if (current_byte & check)
-            {
-                node = node->one;
-            }
-            else
-            {
-                node = node->zero;
-            }
-            current_byte <<= 1;
-            current_bit_count--;
-        }
-        newfile[i] = node->character;
-    }
 }
 
 // This function translates compressed file from info that is now stored in the translation tree
