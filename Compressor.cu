@@ -54,21 +54,21 @@ int main(int argc, char *argv[])
     // Histograming the frequency of bytes.
     unsigned char *readBufPtr, readBuf;
     readBufPtr = &readBuf;
-    long int totalSize = 0, size;
+    long int originalFileSize = 0;
 
     for (char *c = argv[1]; *c; c++)
     { // counting usage frequency of unique bytes on the file name
         freqCount[(unsigned char)(*c)]++;
     }
 
-    size = sizeOfTheFile(argv[1]);
-    totalSize += size;
+    originalFileSize = sizeOfTheFile(argv[1]);
+    std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
 
     // "rb" is for reading binary files
     originalFilePtr = fopen(argv[1], "rb");
     // reading the first byte of the file into readBuf.
     fread(readBufPtr, 1, 1, originalFilePtr);
-    for (long int i = 0; i < size; i++)
+    for (long int i = 0; i < originalFileSize; i++)
     { // counting usage frequency of unique bytes inside the file
         freqCount[readBuf]++;
         fread(readBufPtr, 1, 1, originalFilePtr);
@@ -227,11 +227,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    // This loop processes the Huffman tree nodes, writing their associated transformation scripts to the compressed file.
-    //----------------------------------------
-
-    std::cout << "The size of the sum of ORIGINAL files is: " << totalSize << " bytes" << endl;
-
     // Setting the progress bar's maximum value to the total occurrences of all
     // characters, represented by the root node of the Huffman tree. This reflects the
     // total number of characters processed during compression, providing a measure for
@@ -239,11 +234,6 @@ int main(int argc, char *argv[])
     PROGRESS.MAX = (nodesForHuffmanTree + uniqueSymbolCount * 2 - 2)->occurrences;
 
     originalFilePtr = fopen(argv[1], "rb");
-    // Moving to the end of the file to determine its size.
-    fseek(originalFilePtr, 0, SEEK_END);
-    size = ftell(originalFilePtr);
-    // Rewinding to the start of the file to read from the beginning.
-    rewind(originalFilePtr);
 
     // Handling bit alignment before writing file information.
     if (bitCounter == 8)
@@ -253,9 +243,9 @@ int main(int argc, char *argv[])
     }
 
     // Writing the size of the file, its name, and its content in the compressed format.
-    writeFileSize(size, bufferByte, bitCounter, compressedFilePtr);
+    writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
     writeFileName(argv[1], transformationStrings, bufferByte, bitCounter, compressedFilePtr);
-    writeFileContent(originalFilePtr, size, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
+    writeFileContent(originalFilePtr, originalFileSize, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
     fclose(originalFilePtr);
 
     // Ensuring the last byte is written to the compressed file by aligning the bit counter.
@@ -272,11 +262,11 @@ int main(int argc, char *argv[])
     std::cout << "The size of the COMPRESSED file is: " << compressedFileSize << " bytes" << endl;
 
     // Calculate the compression ratio.
-    float compressionRatio = 100.0f * static_cast<float>(compressedFileSize) / static_cast<float>(totalSize);
+    float compressionRatio = 100.0f * static_cast<float>(compressedFileSize) / static_cast<float>(originalFileSize);
     std::cout << "Compressed file's size is [" << compressionRatio << "%] of the original files." << endl;
 
     // Warning if the compressed file is unexpectedly larger than the original sum.
-    if (compressedFileSize > totalSize)
+    if (compressedFileSize > originalFileSize)
     {
         std::cout << "\nWARNING: The compressed file's size is larger than the sum of the originals.\n\n";
     }
