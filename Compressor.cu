@@ -55,11 +55,6 @@ int main(int argc, char *argv[])
     readBufPtr = &readBuf;
     long int originalFileSize = 0;
 
-    // for (char *c = argv[1]; *c; c++)
-    // { // counting usage frequency of unique bytes on the file name
-    //     freqCount[(unsigned char)(*c)]++;
-    // }
-
     originalFileSize = sizeOfTheFile(argv[1]);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
 
@@ -82,9 +77,7 @@ int main(int argc, char *argv[])
             uniqueSymbolCount++;
         }
     }
-    //---------------------------------------------
 
-    //--------------------3------------------------
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
     // Each leaf node represents a unique byte and its frequency in the input data.
     TreeNode nodesForHuffmanTree[uniqueSymbolCount * 2 - 1];
