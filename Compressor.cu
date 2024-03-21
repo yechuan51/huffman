@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <dirent.h>
 #include "progress_bar.hpp"
 
@@ -14,35 +15,6 @@ long int sizeOfTheFile(char *);
 void writeFileSize(long int, unsigned char &, int, FILE *);
 void writeFileName(char *, string *, unsigned char &, int &, FILE *);
 void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
-
-/*          CONTENT TABLE IN ORDER
----------PART 1-CALCULATING TRANSLATION INFO----------
-Important Note:4 and 5 are the most important parts of this algorithm
-If you dont know how Huffman's algorithm works I really recommend you to check this link before you continue:
-https://en.wikipedia.org/wiki/Huffman_coding#Basic_technique
-
-1-Size information
-2-Counting usage frequency of unique bytes and unique byte count
-3-Creating the base of the translation array
-4-Creating the translation tree inside the translation array by weight distribution
-5-adding strings from top to bottom to create translated versions of unique bytes
-
----------PART 2-CREATION OF COMPRESSED FILE-----------
-    Compressed File's structure had been documented below
-
-first (one byte)            ->  letter_count
-third (bit groups)
-    3.1 (8 bits)            ->  current unique byte
-    3.2 (8 bits)            ->  length of the transformation
-    3.3 (bits)              ->  transformation code of that unique byte
-    sixth (8 bytes)         ->  size of current input_file (IF FILE)
-    eighth (a lot of bits)  ->  transformed version of current input_file (IF FILE)
-
-*whenever we see a new folder we will write seventh then start writing from fourth to eighth
-**groups from fifth to eighth will be written as much as file count in that folder
-    (this is argument_count-1(argc-1) for the main folder)
-
-*/
 
 progress PROGRESS;
 
@@ -414,10 +386,6 @@ void writeFileContent(FILE *original_fp, long int size, string *str_arr, unsigne
 
 long int sizeOfTheFile(char *path)
 {
-    long int size;
-    FILE *fp = fopen(path, "rb");
-    fseek(fp, 0, SEEK_END);
-    size = ftell(fp);
-    fclose(fp);
-    return size;
+    ifstream file(path, ifstream::ate | ifstream::binary);
+    return file.tellg();
 }

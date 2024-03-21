@@ -11,6 +11,8 @@ clean :
 	@rm -f extract
 
 test :
+	@echo "Build archive and extract"
+	@make all
 	@echo "Testing archive"
 	@./archive README.md
 	@echo "Testing extract"
