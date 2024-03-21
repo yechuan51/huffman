@@ -21,19 +21,19 @@ progress PROGRESS;
 struct TreeNode
 { // this structure will be used to create the translation tree
     TreeNode *left, *right;
-    long int occurances;
+    long int occurrences;
     unsigned char character;
     string bit;
 };
 
 bool TreeNodeCompare(TreeNode a, TreeNode b)
 {
-    return a.occurances < b.occurances;
+    return a.occurrences < b.occurrences;
 }
 
 int main(int argc, char *argv[])
 {
-    long int occurances[256] = {0};
+    long int freqCount[256] = {0};
     int uniqueSymbolCount = 0;
     if (argc != 2)
     {
@@ -58,7 +58,7 @@ int main(int argc, char *argv[])
 
     for (char *c = argv[1]; *c; c++)
     { // counting usage frequency of unique bytes on the file name
-        occurances[(unsigned char)(*c)]++;
+        freqCount[(unsigned char)(*c)]++;
     }
 
     size = sizeOfTheFile(argv[1]);
@@ -70,13 +70,13 @@ int main(int argc, char *argv[])
     fread(readBufPtr, 1, 1, originalFilePtr);
     for (long int i = 0; i < size; i++)
     { // counting usage frequency of unique bytes inside the file
-        occurances[readBuf]++;
+        freqCount[readBuf]++;
         fread(readBufPtr, 1, 1, originalFilePtr);
     }
     fclose(originalFilePtr);
 
     // Traverse through all possible bytes and count the number of unique bytes.
-    for (long int *i = occurances; i < occurances + 256; i++)
+    for (long int *i = freqCount; i < freqCount + 256; i++)
     {
         if (*i)
         {
@@ -92,14 +92,14 @@ int main(int argc, char *argv[])
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
-    for (long int *frequency = occurances; frequency < occurances + 256; frequency++)
+    for (long int *frequency = freqCount; frequency < freqCount + 256; frequency++)
     {
         if (*frequency)
         {
             currentNode->right = NULL;
             currentNode->left = NULL;
-            currentNode->occurances = *frequency;
-            currentNode->character = frequency - occurances;
+            currentNode->occurrences = *frequency;
+            currentNode->character = frequency - freqCount;
             currentNode++;
         }
     }
@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
     for (int i = 0; i < uniqueSymbolCount - 1; i++)
     {
         // Create a new internal node that combines the two smallest nodes.
-        newInternalNode->occurances = smallestNode->occurances + secondSmallestNode->occurances;
+        newInternalNode->occurrences = smallestNode->occurrences + secondSmallestNode->occurrences;
         newInternalNode->left = smallestNode;
         newInternalNode->right = secondSmallestNode;
         // Assign bits for tree navigation: '1' for the path to smallestNode,
@@ -136,7 +136,7 @@ int main(int argc, char *argv[])
         else
         {
             // Choose the next smallest node from the leaf or internal nodes.
-            smallestNode = (nextLeafNode->occurances < nextInternalNode->occurances) ? nextLeafNode++ : nextInternalNode++;
+            smallestNode = (nextLeafNode->occurrences < nextInternalNode->occurrences) ? nextLeafNode++ : nextInternalNode++;
         }
 
         // Repeat the process for secondSmallestNode.
@@ -152,7 +152,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-            secondSmallestNode = (nextLeafNode->occurances < nextInternalNode->occurances) ? nextLeafNode++ : nextInternalNode++;
+            secondSmallestNode = (nextLeafNode->occurrences < nextInternalNode->occurrences) ? nextLeafNode++ : nextInternalNode++;
         }
     }
 
@@ -236,7 +236,7 @@ int main(int argc, char *argv[])
     // characters, represented by the root node of the Huffman tree. This reflects the
     // total number of characters processed during compression, providing a measure for
     // tracking compression progress.
-    PROGRESS.MAX = (nodesForHuffmanTree + uniqueSymbolCount * 2 - 2)->occurances;
+    PROGRESS.MAX = (nodesForHuffmanTree + uniqueSymbolCount * 2 - 2)->occurrences;
 
     originalFilePtr = fopen(argv[1], "rb");
     // Moving to the end of the file to determine its size.
