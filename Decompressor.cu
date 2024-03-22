@@ -6,7 +6,6 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "progress_bar.hpp"
 
 using namespace std;
 
@@ -17,8 +16,6 @@ struct TranslationNode
     TranslationNode *zero, *one;
     unsigned char character;
 };
-
-progress PROGRESS;
 
 long int read_file_size(unsigned char &, int, FILE *);
 void translate_file(char *, long int, unsigned char &, int &, TranslationNode *, FILE *);
@@ -51,7 +48,7 @@ void burn_tree(TranslationNode *);
 int main(int argc, char *argv[])
 {
     int uniqueByteCount = 0;
-    FILE *compressedFile, *newFile;
+    FILE *compressedFile;
     if (argc != 2)
     {
         std::cout << "Missing compressed file name." << endl
@@ -66,9 +63,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    // Initialize the progress bar with the total size of the compressed file.
     fseek(compressedFile, 0, SEEK_END);
-    PROGRESS.MAX = ftell(compressedFile); // Setting progress bar maximum value
     fseek(compressedFile, 0, SEEK_SET);
 
     // Reading the unique byte count from the compressed file's header.
@@ -240,7 +235,6 @@ long int read_file_size(unsigned char &current_byte, int current_bit_count, FILE
             multiplier *= 256;
         }
     }
-    PROGRESS.current(ftell(fp_compressed)); // updating progress bar
     return size;
     // Size was written to the compressed file from least significiant byte
     // to the most significiant byte to make sure system's endianness

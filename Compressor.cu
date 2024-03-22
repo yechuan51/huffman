@@ -6,7 +6,6 @@
 #include <cstring>
 #include <fstream>
 #include <dirent.h>
-#include "progress_bar.hpp"
 
 using namespace std;
 
@@ -14,8 +13,6 @@ void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
 long int sizeOfTheFile(char *);
 void writeFileSize(long int, unsigned char &, int, FILE *);
 void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
-
-progress PROGRESS;
 
 struct TreeNode
 { // this structure will be used to create the translation tree
@@ -219,12 +216,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Setting the progress bar's maximum value to the total occurrences of all
-    // characters, represented by the root node of the Huffman tree. This reflects the
-    // total number of characters processed during compression, providing a measure for
-    // tracking compression progress.
-    PROGRESS.MAX = (nodesForHuffmanTree + uniqueSymbolCount * 2 - 2)->occurrences;
-
     originalFilePtr = fopen(argv[1], "rb");
 
     // Handling bit alignment before writing file information.
@@ -282,7 +273,6 @@ void writeFromUChar(unsigned char uChar, unsigned char &current_byte, int curren
 // It is done like this to make sure that it can work on little, big or middle-endian systems
 void writeFileSize(long int size, unsigned char &current_byte, int current_bit_count, FILE *compressed_fp)
 {
-    PROGRESS.next(size); // updating progress bar
     for (int i = 0; i < 8; i++)
     {
         writeFromUChar(size % 256, current_byte, current_bit_count, compressed_fp);
