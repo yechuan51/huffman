@@ -194,11 +194,6 @@ int main(int argc, char *argv[])
         transformationStringPtr = &node->bit[0];
         while (*transformationStringPtr)
         {
-            if (bitCounter == 8)
-            {
-                fwrite(&bufferByte, 1, 1, compressedFilePtr);
-                bitCounter = 0;
-            }
             bufferByte <<= 1;
             if (*transformationStringPtr == '1')
             {
@@ -206,17 +201,15 @@ int main(int argc, char *argv[])
             }
             bitCounter++;
             transformationStringPtr++;
+            if (bitCounter == 8)
+            {
+                fwrite(&bufferByte, 1, 1, compressedFilePtr);
+                bitCounter = 0;
+            }
         }
     }
 
     originalFilePtr = fopen(argv[1], "rb");
-
-    // Handling bit alignment before writing file information.
-    if (bitCounter == 8)
-    {
-        fwrite(&bufferByte, 1, 1, compressedFilePtr);
-        bitCounter = 0;
-    }
 
     // Writing the size of the file, its name, and its content in the compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
@@ -256,6 +249,8 @@ int main(int argc, char *argv[])
 // and puts the rest to curent byte for later use
 void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
 {
+    // Going to write at least 1 byte, first shift the bufferByte to the left
+    // to make room for the new byte.
     bufferByte <<= 8 - bitCounter;
     bufferByte |= (byteToWrite >> bitCounter);
     fwrite(&bufferByte, 1, 1, filePtr);
