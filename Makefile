@@ -21,6 +21,6 @@ test :
 	@diff README.md DECOMPRESSED_FILE
 	@echo "Delete compressed file"
 	@rm README.md.compressed
-	@rm DECOMPRESSED_FILE
+	@rm DECOMPRESSED_FILE*
 
 .PHONY : all clean

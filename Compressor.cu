@@ -13,6 +13,7 @@ void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
 long int sizeOfTheFile(char *);
 void writeFileSize(long int, unsigned char &, int, FILE *);
 void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
+void writeIfFullBuffer(unsigned char &, int &, FILE *);
 
 struct TreeNode
 { // this structure will be used to create the translation tree
@@ -201,11 +202,7 @@ int main(int argc, char *argv[])
             }
             bitCounter++;
             transformationStringPtr++;
-            if (bitCounter == 8)
-            {
-                fwrite(&bufferByte, 1, 1, compressedFilePtr);
-                bitCounter = 0;
-            }
+            writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
         }
     }
 
@@ -280,27 +277,14 @@ void writeFileContent(FILE *originalFilePtr, long int originalFileSize, string *
         strPointer = &transformationStrings[buf][0];
         while (*strPointer)
         {
-            if (bitCounter == 8)
+            writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
+
+            bufferByte <<= 1;
+            if (*strPointer == '1')
             {
-                fwrite(&bufferByte, 1, 1, compressedFilePtr);
-                bitCounter = 0;
-            }
-            switch (*strPointer)
-            {
-            case '1':
-                bufferByte <<= 1;
                 bufferByte |= 1;
-                bitCounter++;
-                break;
-            case '0':
-                bufferByte <<= 1;
-                bitCounter++;
-                break;
-            default:
-                cout << "An error has occurred" << endl
-                     << "Process has been aborted";
-                exit(2);
             }
+            bitCounter++;
             strPointer++;
         }
         fread(bufPtr, 1, 1, originalFilePtr);
@@ -311,4 +295,13 @@ long int sizeOfTheFile(char *path)
 {
     ifstream file(path, ifstream::ate | ifstream::binary);
     return file.tellg();
+}
+
+void writeIfFullBuffer(unsigned char &bufferByte, int& bitCounter, FILE *filePtr)
+{
+    if (bitCounter == 8)
+    {
+        fwrite(&bufferByte, 1, 1, filePtr);
+        bitCounter = 0;
+    }
 }
