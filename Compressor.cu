@@ -6,9 +6,12 @@
 #include <cstring>
 #include <fstream>
 #include <dirent.h>
+#include <cstdio>
+#include <iomanip>
 
 using namespace std;
 
+void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
 void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
 long int sizeOfTheFile(char *);
 void writeFileSize(long int, unsigned char &, int, FILE *);
@@ -57,7 +60,7 @@ int main(int argc, char *argv[])
     readBufPtr = (unsigned char *)&readBuf;
 
     originalFilePtr = fopen(argv[1], "rb");
-    while (fread(readBufPtr, 1, 1, originalFilePtr))
+    while (fread(readBufPtr, 2, 1, originalFilePtr))
     {
         freqCount[readBuf]++;
     }
@@ -65,7 +68,7 @@ int main(int argc, char *argv[])
     fclose(originalFilePtr);
 
     // Traverse through all possible bytes and count the number of unique bytes.
-    for (long int *i = freqCount; i < freqCount + 256; i++)
+    for (long int *i = freqCount; i < freqCount + 65536; i++)
     {
         if (*i)
         {
@@ -79,7 +82,7 @@ int main(int argc, char *argv[])
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
-    for (long int *frequency = freqCount; frequency < freqCount + 256; frequency++)
+    for (long int *frequency = freqCount; frequency < freqCount + 65536; frequency++)
     {
         if (*frequency)
         {
@@ -160,37 +163,58 @@ int main(int argc, char *argv[])
         }
     }
 
+    // bool debug = true;
+
+    // if (debug) {
+    //     cout << "Print the sorted leaf nodes (symbols and occurrences):\n";
+    //     for (int i = 0; i < uniqueSymbolCount * 2 - 1; ++i) {
+    //         const TreeNode& node = nodesForHuffmanTree[i];
+
+    //         char firstChar = node.character & 0xFF;
+    //         char secondChar = (node.character >> 8) & 0xFF;
+
+    //         // Then, create a string from those bytes. Assuming that every 2-byte
+    //         // symbol represents valid characters or a combination thereof.
+    //         string symbolStr;
+    //         symbolStr += firstChar;
+    //         symbolStr += secondChar;
+
+    //         // Print the symbol as a string along with its occurrences.
+    //         cout << "Node " << i 
+    //             << ": Symbol: '" << symbolStr 
+    //             << "', Occurrences: " << node.occurrences 
+    //             << ", Bit: " << node.bit << "\n";
+    //         }
+    //     return 0;
+    // }
+
     string scompressed = argv[1];
     scompressed += ".compressed";
     FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
 
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
-    fwrite(&uniqueSymbolCount, 1, 1, compressedFilePtr);
+    fwrite(&uniqueSymbolCount, 2, 1, compressedFilePtr);
 
     int bitCounter = 0;
-    unsigned char bufferByte;
-    // Initializing a pointer for iterating through the transformation strings.
-    char *transformationStringPtr;
-    // Variables for storing the length of the transformation string and the current character being processed.
-    unsigned char transformationLength, currentCharacter;
+    unsigned char bufferByte = 0;
     // Array to store transformation strings for each unique character to optimize compression.
-    string transformationStrings[256];
+    string transformationStrings[65536];
 
     // Iterate through each node in the Huffman tree to write transformation codes to the compressed file.
     for (TreeNode *node = nodesForHuffmanTree; node < nodesForHuffmanTree + uniqueSymbolCount; node++)
     {
         // Store the transformation string for the current character in the array.
         transformationStrings[node->character] = node->bit;
-        transformationLength = node->bit.length();
-        currentCharacter = node->character;
+        unsigned char transformationLength = node->bit.length();
+        unsigned short currentCharacter = node->character;
 
         // Write the current character and its transformation string length to the compressed file.
-        writeFromUChar(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
+        writeFromUShort(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
         writeFromUChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
 
         // Write the transformation string bit by bit to the compressed file.
-        transformationStringPtr = &node->bit[0];
+        char *transformationStringPtr = &node->bit[0];
         while (*transformationStringPtr)
         {
             bufferByte <<= 1;
@@ -250,6 +274,15 @@ void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte, int bi
     bufferByte |= (byteToWrite >> bitCounter);
     fwrite(&bufferByte, 1, 1, filePtr);
     bufferByte = byteToWrite;
+}
+
+void writeFromUShort(unsigned short shortToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
+{
+    unsigned char firstByte = (shortToWrite >> 8) & 0xFF; // High byte
+    unsigned char secondByte = shortToWrite & 0xFF; // Low byte
+
+    writeFromUChar(firstByte, bufferByte, bitCounter, filePtr);
+    writeFromUChar(secondByte, bufferByte, bitCounter, filePtr);
 }
 
 // This function is writing byte count of current input file to compressed file using 8 bytes
