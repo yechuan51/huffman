@@ -76,6 +76,8 @@ int main(int argc, char *argv[])
         }
     }
 
+    std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
+
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
     // Each leaf node represents a unique byte and its frequency in the input data.
     TreeNode nodesForHuffmanTree[uniqueSymbolCount * 2 - 1];

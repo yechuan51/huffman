@@ -9,19 +9,18 @@
 
 using namespace std;
 
-const unsigned char check = 0b10000000;
-
 struct TranslationNode
 {
     TranslationNode *zero, *one;
-    unsigned char character;
+    unsigned short character;
 };
 
-long int read_file_size(unsigned char &, int, FILE *);
-void translate_file(char *, long int, unsigned char &, int &, TranslationNode *, FILE *);
+long int readFileSize(unsigned char &, int, FILE *);
+void translateFile(char *, long int, unsigned char &, int &, TranslationNode *, FILE *);
 
 unsigned char process_8_bits_NUMBER(unsigned char &, int, FILE *);
-void process_n_bits_TO_STRING(unsigned char &, int, int &, FILE *, TranslationNode *, unsigned char);
+unsigned short process_16_bits_DATA(unsigned char &, int &, FILE *);
+void process_n_bits_TO_STRING(unsigned char &, int, int &, FILE *, TranslationNode *, unsigned short);
 
 bool file_exists(char *);
 void change_name_if_exists(char *);
@@ -47,7 +46,7 @@ void burn_tree(TranslationNode *);
 
 int main(int argc, char *argv[])
 {
-    int uniqueByteCount = 0;
+    int uniqueSymbolCount = 0;
     FILE *compressedFile;
     if (argc != 2)
     {
@@ -67,23 +66,23 @@ int main(int argc, char *argv[])
     fseek(compressedFile, 0, SEEK_SET);
 
     // Reading the unique byte count from the compressed file's header.
-    fread(&uniqueByteCount, 1, 1, compressedFile);
-    if (uniqueByteCount == 0)
-        uniqueByteCount = 256; // Handling the special case where there are 256 unique bytes.
+    fread(&uniqueSymbolCount, 2, 1, compressedFile);
+    if (uniqueSymbolCount == 0)
+        uniqueSymbolCount = 65536; // Handling the special case where there are 256 unique bytes.
 
-    unsigned char bufferByte = 0, decodedCharacter;
-    int bitCounter = 0, transformationLength;
+    unsigned char bufferByte = 0;
+    int bitCounter = 0;
     TranslationNode *root = new TranslationNode;
     root->zero = nullptr;
     root->one = nullptr;
 
     // Reading transformation information for each unique byte and storing it in the translation tree.
-    for (int i = 0; i < uniqueByteCount; i++)
+    for (int i = 0; i < uniqueSymbolCount; i++)
     {
-        decodedCharacter = process_8_bits_NUMBER(bufferByte, bitCounter, compressedFile);
-        transformationLength = process_8_bits_NUMBER(bufferByte, bitCounter, compressedFile);
+        unsigned short decodedCharacter = process_16_bits_DATA(bufferByte, bitCounter, compressedFile);
+        unsigned int transformationLength = (unsigned int)process_8_bits_NUMBER(bufferByte, bitCounter, compressedFile);
         if (transformationLength == 0)
-            transformationLength = 256;
+            transformationLength = 65536;
         process_n_bits_TO_STRING(bufferByte, transformationLength, bitCounter, compressedFile, root, decodedCharacter);
     }
 
@@ -91,12 +90,12 @@ int main(int argc, char *argv[])
     // to most significiant byte to make sure system's endianness
     // does not affect the process and that is why we are processing size information like this
 
-    long int fileSize = read_file_size(bufferByte, bitCounter, compressedFile);
+    long int fileSize = readFileSize(bufferByte, bitCounter, compressedFile);
     string newfileName = "DECOMPRESSED_FILE";
     change_name_if_exists(&newfileName[0]);
 
     // Translating and writing the file content based on the Huffman encoding.
-    translate_file(&newfileName[0], fileSize, bufferByte, bitCounter, root, compressedFile);
+    translateFile(&newfileName[0], fileSize, bufferByte, bitCounter, root, compressedFile);
 
     // Clean up.
     fclose(compressedFile);
@@ -117,28 +116,17 @@ void burn_tree(TranslationNode *node)
 // process_n_bits_TO_STRING function reads n successive bits from the compressed file
 // and stores it in a leaf of the translation tree,
 // after creating that leaf and sometimes after creating nodes that are binding that leaf to the tree.
-void process_n_bits_TO_STRING(unsigned char &current_byte, int n, int &current_bit_count, FILE *fp_read, TranslationNode *node, unsigned char uChar)
+void process_n_bits_TO_STRING(unsigned char &bufferByte, int n, int &bitCounter, FILE *filePtr, TranslationNode *node, unsigned short uShort)
 {
     for (int i = 0; i < n; i++)
     {
-        if (current_bit_count == 0)
+        if (bitCounter == 0)
         {
-            fread(&current_byte, 1, 1, fp_read);
-            current_bit_count = 8;
+            fread(&bufferByte, 1, 1, filePtr);
+            bitCounter = 8;
         }
-
-        switch (current_byte & check)
+        if (bufferByte & 0x80)
         {
-        case 0:
-            if (!(node->zero))
-            {
-                node->zero = new TranslationNode;
-                node->zero->zero = NULL;
-                node->zero->one = NULL;
-            }
-            node = node->zero;
-            break;
-        case 128:
             if (!(node->one))
             {
                 node->one = new TranslationNode;
@@ -146,25 +134,43 @@ void process_n_bits_TO_STRING(unsigned char &current_byte, int n, int &current_b
                 node->one->one = NULL;
             }
             node = node->one;
-            break;
         }
-        current_byte <<= 1;
-        current_bit_count--;
+        else
+        {
+            if (!(node->zero))
+            {
+                node->zero = new TranslationNode;
+                node->zero->zero = NULL;
+                node->zero->one = NULL;
+            }
+            node = node->zero;
+        }
+
+        bufferByte <<= 1;
+        bitCounter--;
     }
-    node->character = uChar;
+    node->character = uShort;
 }
 
 // process_8_bits_NUMBER reads 8 successive bits from compressed file
 //(does not have to be in the same byte)
 // and returns it in unsigned char form
-unsigned char process_8_bits_NUMBER(unsigned char &current_byte, int current_bit_count, FILE *fp_read)
+unsigned char process_8_bits_NUMBER(unsigned char &currentByte, int bitCounter, FILE *filePtr)
 {
     unsigned char val, temp_byte;
-    fread(&temp_byte, 1, 1, fp_read);
-    val = current_byte | (temp_byte >> current_bit_count);
-    current_byte = temp_byte << 8 - current_bit_count;
+    fread(&temp_byte, 1, 1, filePtr);
+    val = currentByte | (temp_byte >> bitCounter);
+    currentByte = temp_byte << 8 - bitCounter;
     return val;
 }
+
+
+unsigned short process_16_bits_DATA(unsigned char &currentByte, int &bitCounter, FILE *filePtr) {
+    unsigned short highPart = process_8_bits_NUMBER(currentByte, bitCounter, filePtr);
+    unsigned short lowPart = process_8_bits_NUMBER(currentByte, bitCounter, filePtr);
+    return (highPart << 8) | lowPart;
+}
+
 
 void change_name_if_exists(char *name)
 {
@@ -224,40 +230,36 @@ bool file_exists(char *name)
 }
 
 // returns file's size
-long int read_file_size(unsigned char &current_byte, int current_bit_count, FILE *fp_compressed)
+long int readFileSize(unsigned char &bufferByte, int bitCounter, FILE *filePtr)
 {
     long int size = 0;
     {
         long int multiplier = 1;
         for (int i = 0; i < 8; i++)
         {
-            size += process_8_bits_NUMBER(current_byte, current_bit_count, fp_compressed) * multiplier;
+            size += process_8_bits_NUMBER(bufferByte, bitCounter, filePtr) * multiplier;
             multiplier *= 256;
         }
     }
     return size;
-    // Size was written to the compressed file from least significiant byte
-    // to the most significiant byte to make sure system's endianness
-    // does not affect the process and that is why we are processing size information like this
 }
 
 // This function translates compressed file from info that is now stored in the translation tree
 // then writes it to a newly created file
-void translate_file(char *path, long int size, unsigned char &current_byte, int &current_bit_count, TranslationNode *root, FILE *fp_compressed)
+void translateFile(char *newFileName, long int fileSize, unsigned char &bufferByte, int &bitCounter, TranslationNode *root, FILE *filePtr)
 {
-    TranslationNode *node;
-    FILE *fp_new = fopen(path, "wb");
-    for (long int i = 0; i < size; i++)
+    FILE *newFilePtr = fopen(newFileName, "wb");
+    for (long int i = 0; i < fileSize; i+=2)
     {
-        node = root;
+        TranslationNode *node = root;
         while (node->zero || node->one)
         {
-            if (current_bit_count == 0)
+            if (bitCounter == 0)
             {
-                fread(&current_byte, 1, 1, fp_compressed);
-                current_bit_count = 8;
+                fread(&bufferByte, 1, 1, filePtr);
+                bitCounter = 8;
             }
-            if (current_byte & check)
+            if (bufferByte & 0x80)
             {
                 node = node->one;
             }
@@ -265,10 +267,10 @@ void translate_file(char *path, long int size, unsigned char &current_byte, int 
             {
                 node = node->zero;
             }
-            current_byte <<= 1;
-            current_bit_count--;
+            bufferByte <<= 1;
+            bitCounter--;
         }
-        fwrite(&(node->character), 1, 1, fp_new);
+        fwrite(&(node->character), 2, 1, newFilePtr);
     }
-    fclose(fp_new);
+    fclose(newFilePtr);
 }
