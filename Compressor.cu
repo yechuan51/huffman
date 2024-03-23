@@ -19,7 +19,7 @@ struct TreeNode
 { // this structure will be used to create the translation tree
     TreeNode *left, *right;
     long int occurrences;
-    unsigned char character;
+    unsigned short character;
     string bit;
 };
 
@@ -30,8 +30,6 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
 
 int main(int argc, char *argv[])
 {
-    long int freqCount[256] = {0};
-    int uniqueSymbolCount = 0;
     if (argc != 2)
     {
         std::cout << "Must provide a single file name." << endl;
@@ -48,14 +46,16 @@ int main(int argc, char *argv[])
     }
     fclose(originalFilePtr);
 
-    // Histograming the frequency of bytes.
-    unsigned char *readBufPtr, readBuf;
-    readBufPtr = &readBuf;
-
     long int originalFileSize = sizeOfTheFile(argv[1]);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
 
-    // "rb" is for reading binary files
+    long int freqCount[65536] = {0};
+    int uniqueSymbolCount = 0;
+    // Histograming the frequency of bytes.
+    unsigned short readBuf;
+    unsigned char *readBufPtr;
+    readBufPtr = (unsigned char *)&readBuf;
+
     originalFilePtr = fopen(argv[1], "rb");
     // reading the first byte of the file into readBuf.
     fread(readBufPtr, 1, 1, originalFilePtr);
