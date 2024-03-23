@@ -59,10 +59,23 @@ int main(int argc, char *argv[])
     unsigned char *readBufPtr;
     readBufPtr = (unsigned char *)&readBuf;
 
+    bool isOdd = originalFileSize % 2 == 1;
+    unsigned char lastByte = 0;
     originalFilePtr = fopen(argv[1], "rb");
-    while (fread(readBufPtr, 2, 1, originalFilePtr))
+
+    for (int i = 0; i < originalFileSize / 2; i++)
     {
+        fread(readBufPtr, 2, 1, originalFilePtr);
         freqCount[readBuf]++;
+
+        char first = readBuf >> 8;
+        char second = readBuf & 0xFF;
+        std::cout << "Current byte in hex: " << hex << (int)first << " " << (int)second << endl;
+    }
+
+    if (isOdd) {
+        fread(&lastByte, 1, 1, originalFilePtr);
+        std::cout << "Last byte: " << hex << (int)lastByte << endl;
     }
 
     fclose(originalFilePtr);
@@ -165,31 +178,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    // bool debug = true;
-
-    // if (debug) {
-    //     cout << "Print the sorted leaf nodes (symbols and occurrences):\n";
-    //     for (int i = 0; i < uniqueSymbolCount * 2 - 1; ++i) {
-    //         const TreeNode& node = nodesForHuffmanTree[i];
-
-    //         char firstChar = node.character & 0xFF;
-    //         char secondChar = (node.character >> 8) & 0xFF;
-
-    //         // Then, create a string from those bytes. Assuming that every 2-byte
-    //         // symbol represents valid characters or a combination thereof.
-    //         string symbolStr;
-    //         symbolStr += firstChar;
-    //         symbolStr += secondChar;
-
-    //         // Print the symbol as a string along with its occurrences.
-    //         cout << "Node " << i 
-    //             << ": Symbol: '" << symbolStr 
-    //             << "', Occurrences: " << node.occurrences 
-    //             << ", Bit: " << node.bit << "\n";
-    //         }
-    //     return 0;
-    // }
-
     string scompressed = argv[1];
     scompressed += ".compressed";
     FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
@@ -197,6 +185,15 @@ int main(int argc, char *argv[])
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
     fwrite(&uniqueSymbolCount, 2, 1, compressedFilePtr);
+
+    // Write last byte information.
+
+    fwrite(&isOdd, 1, 1, compressedFilePtr);
+    if (isOdd)
+    {
+        // Write the last byte.
+        fwrite(&lastByte, 1, 1, compressedFilePtr);
+    }
 
     int bitCounter = 0;
     unsigned char bufferByte = 0;
@@ -281,7 +278,7 @@ void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte, int bi
 void writeFromUShort(unsigned short shortToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
 {
     unsigned char firstByte = (shortToWrite >> 8) & 0xFF; // High byte
-    unsigned char secondByte = shortToWrite & 0xFF; // Low byte
+    unsigned char secondByte = shortToWrite & 0xFF;       // Low byte
 
     writeFromUChar(firstByte, bufferByte, bitCounter, filePtr);
     writeFromUChar(secondByte, bufferByte, bitCounter, filePtr);
@@ -328,7 +325,7 @@ long int sizeOfTheFile(char *path)
     return file.tellg();
 }
 
-void writeIfFullBuffer(unsigned char &bufferByte, int& bitCounter, FILE *filePtr)
+void writeIfFullBuffer(unsigned char &bufferByte, int &bitCounter, FILE *filePtr)
 {
     if (bitCounter == 8)
     {

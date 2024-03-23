@@ -16,7 +16,7 @@ struct TranslationNode
 };
 
 long int readFileSize(unsigned char &, int, FILE *);
-void translateFile(char *, long int, unsigned char &, int &, TranslationNode *, FILE *);
+void translateFile(char *, long int, unsigned char &, int &, TranslationNode *, FILE *, bool, unsigned char);
 
 unsigned char process_8_bits_NUMBER(unsigned char &, int, FILE *);
 unsigned short process_16_bits_DATA(unsigned char &, int &, FILE *);
@@ -70,6 +70,16 @@ int main(int argc, char *argv[])
     if (uniqueSymbolCount == 0)
         uniqueSymbolCount = 65536; // Handling the special case where there are 256 unique bytes.
 
+    // Read last byte information.
+    bool isOdd = false;
+    unsigned char lastByte = 0;
+    fread(&isOdd, 1, 1, compressedFile);
+    if (isOdd)
+    {
+        fread(&lastByte, 1, 1, compressedFile);
+    }
+
+
     unsigned char bufferByte = 0;
     int bitCounter = 0;
     TranslationNode *root = new TranslationNode;
@@ -95,7 +105,7 @@ int main(int argc, char *argv[])
     change_name_if_exists(&newfileName[0]);
 
     // Translating and writing the file content based on the Huffman encoding.
-    translateFile(&newfileName[0], fileSize, bufferByte, bitCounter, root, compressedFile);
+    translateFile(&newfileName[0], fileSize, bufferByte, bitCounter, root, compressedFile, isOdd, lastByte);
 
     // Clean up.
     fclose(compressedFile);
@@ -246,10 +256,10 @@ long int readFileSize(unsigned char &bufferByte, int bitCounter, FILE *filePtr)
 
 // This function translates compressed file from info that is now stored in the translation tree
 // then writes it to a newly created file
-void translateFile(char *newFileName, long int fileSize, unsigned char &bufferByte, int &bitCounter, TranslationNode *root, FILE *filePtr)
+void translateFile(char *newFileName, long int fileSize, unsigned char &bufferByte, int &bitCounter, TranslationNode *root, FILE *filePtr, bool isOdd, unsigned char lastByte)
 {
     FILE *newFilePtr = fopen(newFileName, "wb");
-    for (long int i = 0; i < fileSize; i+=2)
+    for (long int i = 0; i < fileSize / 2; i++)
     {
         TranslationNode *node = root;
         while (node->zero || node->one)
@@ -271,6 +281,11 @@ void translateFile(char *newFileName, long int fileSize, unsigned char &bufferBy
             bitCounter--;
         }
         fwrite(&(node->character), 2, 1, newFilePtr);
+    }
+
+    if (isOdd)
+    {
+        fwrite(&lastByte, 1, 1, newFilePtr);
     }
     fclose(newFilePtr);
 }
