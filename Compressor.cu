@@ -57,13 +57,11 @@ int main(int argc, char *argv[])
     readBufPtr = (unsigned char *)&readBuf;
 
     originalFilePtr = fopen(argv[1], "rb");
-    // reading the first byte of the file into readBuf.
-    fread(readBufPtr, 1, 1, originalFilePtr);
-    for (long int i = 0; i < originalFileSize; i++)
-    { // counting usage frequency of unique bytes inside the file
+    while (fread(readBufPtr, 1, 1, originalFilePtr))
+    {
         freqCount[readBuf]++;
-        fread(readBufPtr, 1, 1, originalFilePtr);
     }
+
     fclose(originalFilePtr);
 
     // Traverse through all possible bytes and count the number of unique bytes.
