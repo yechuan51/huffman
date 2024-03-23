@@ -299,13 +299,12 @@ void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter,
 // Below function translates and writes bytes from current input file to the compressed file.
 void writeFileContent(FILE *originalFilePtr, long int originalFileSize, string *transformationStrings, unsigned char &bufferByte, int &bitCounter, FILE *compressedFilePtr)
 {
-    unsigned char *bufPtr, buf;
-    bufPtr = &buf;
-    char *strPointer;
-    fread(bufPtr, 1, 1, originalFilePtr);
-    for (long int i = 0; i < originalFileSize; i++)
+    unsigned short readBuf;
+    unsigned char *readBufPtr;
+    readBufPtr = (unsigned char *)&readBuf;
+    while (fread(readBufPtr, 2, 1, originalFilePtr))
     {
-        strPointer = &transformationStrings[buf][0];
+        char *strPointer = &transformationStrings[readBuf][0];
         while (*strPointer)
         {
             writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
@@ -318,7 +317,6 @@ void writeFileContent(FILE *originalFilePtr, long int originalFileSize, string *
             bitCounter++;
             strPointer++;
         }
-        fread(bufPtr, 1, 1, originalFilePtr);
     }
 }
 
