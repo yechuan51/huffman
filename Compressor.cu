@@ -50,9 +50,8 @@ int main(int argc, char *argv[])
     // Histograming the frequency of bytes.
     unsigned char *readBufPtr, readBuf;
     readBufPtr = &readBuf;
-    long int originalFileSize = 0;
 
-    originalFileSize = sizeOfTheFile(argv[1]);
+    long int originalFileSize = sizeOfTheFile(argv[1]);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
 
     // "rb" is for reading binary files
@@ -166,14 +165,12 @@ int main(int argc, char *argv[])
     scompressed += ".compressed";
     FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
 
-    int bitCounter = 0;
-    unsigned char bufferByte;
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
     fwrite(&uniqueSymbolCount, 1, 1, compressedFilePtr);
 
-    //----------------------------------------
-
+    int bitCounter = 0;
+    unsigned char bufferByte;
     // Initializing a pointer for iterating through the transformation strings.
     char *transformationStringPtr;
     // Variables for storing the length of the transformation string and the current character being processed.
@@ -202,14 +199,10 @@ int main(int argc, char *argv[])
                 fwrite(&bufferByte, 1, 1, compressedFilePtr);
                 bitCounter = 0;
             }
+            bufferByte <<= 1;
             if (*transformationStringPtr == '1')
             {
-                bufferByte <<= 1;
                 bufferByte |= 1;
-            }
-            else
-            {
-                bufferByte <<= 1;
             }
             bitCounter++;
             transformationStringPtr++;
@@ -261,61 +254,61 @@ int main(int argc, char *argv[])
 // below function is used for writing the uChar to compressed file
 // It does not write it directly as one byte instead it mixes uChar and current byte, writes 8 bits of it
 // and puts the rest to curent byte for later use
-void writeFromUChar(unsigned char uChar, unsigned char &current_byte, int current_bit_count, FILE *fp_write)
+void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
 {
-    current_byte <<= 8 - current_bit_count;
-    current_byte |= (uChar >> current_bit_count);
-    fwrite(&current_byte, 1, 1, fp_write);
-    current_byte = uChar;
+    bufferByte <<= 8 - bitCounter;
+    bufferByte |= (byteToWrite >> bitCounter);
+    fwrite(&bufferByte, 1, 1, filePtr);
+    bufferByte = byteToWrite;
 }
 
 // This function is writing byte count of current input file to compressed file using 8 bytes
 // It is done like this to make sure that it can work on little, big or middle-endian systems
-void writeFileSize(long int size, unsigned char &current_byte, int current_bit_count, FILE *compressed_fp)
+void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
 {
     for (int i = 0; i < 8; i++)
     {
-        writeFromUChar(size % 256, current_byte, current_bit_count, compressed_fp);
-        size /= 256;
+        writeFromUChar(fileSize % 256, bufferByte, bitCounter, filePtr);
+        fileSize /= 256;
     }
 }
 
 // Below function translates and writes bytes from current input file to the compressed file.
-void writeFileContent(FILE *original_fp, long int size, string *str_arr, unsigned char &current_byte, int &current_bit_count, FILE *compressed_fp)
+void writeFileContent(FILE *originalFilePtr, long int originalFileSize, string *transformationStrings, unsigned char &bufferByte, int &bitCounter, FILE *compressedFilePtr)
 {
-    unsigned char *x_p, x;
-    x_p = &x;
-    char *str_pointer;
-    fread(x_p, 1, 1, original_fp);
-    for (long int i = 0; i < size; i++)
+    unsigned char *bufPtr, buf;
+    bufPtr = &buf;
+    char *strPointer;
+    fread(bufPtr, 1, 1, originalFilePtr);
+    for (long int i = 0; i < originalFileSize; i++)
     {
-        str_pointer = &str_arr[x][0];
-        while (*str_pointer)
+        strPointer = &transformationStrings[buf][0];
+        while (*strPointer)
         {
-            if (current_bit_count == 8)
+            if (bitCounter == 8)
             {
-                fwrite(&current_byte, 1, 1, compressed_fp);
-                current_bit_count = 0;
+                fwrite(&bufferByte, 1, 1, compressedFilePtr);
+                bitCounter = 0;
             }
-            switch (*str_pointer)
+            switch (*strPointer)
             {
             case '1':
-                current_byte <<= 1;
-                current_byte |= 1;
-                current_bit_count++;
+                bufferByte <<= 1;
+                bufferByte |= 1;
+                bitCounter++;
                 break;
             case '0':
-                current_byte <<= 1;
-                current_bit_count++;
+                bufferByte <<= 1;
+                bitCounter++;
                 break;
             default:
                 cout << "An error has occurred" << endl
                      << "Process has been aborted";
                 exit(2);
             }
-            str_pointer++;
+            strPointer++;
         }
-        fread(x_p, 1, 1, original_fp);
+        fread(bufPtr, 1, 1, originalFilePtr);
     }
 }
 

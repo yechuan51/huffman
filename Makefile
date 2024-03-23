@@ -18,9 +18,9 @@ test :
 	@echo "Testing extract"
 	@./extract README.md.compressed
 	@echo "Comparing files"
-	@diff README.md README\(1\).md
+	@diff README.md DECOMPRESSED_FILE
 	@echo "Delete compressed file"
 	@rm README.md.compressed
-	@rm README\(1\).md
+	@rm DECOMPRESSED_FILE
 
 .PHONY : all clean
