@@ -40,14 +40,13 @@ int main(int argc, char *argv[])
     }
 
     FILE *originalFilePtr;
-    originalFilePtr = fopen(argv[1], "rb");
-    if (!originalFilePtr)
+    ifstream originalFile(argv[1], ios::binary);
+    if (!originalFile.is_open())
     {
         std::cout << argv[1] << " file does not exist" << endl
                   << "Process has been terminated" << endl;
         return 0;
     }
-    fclose(originalFilePtr);
 
     long int originalFileSize = sizeOfTheFile(argv[1]);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
@@ -56,29 +55,24 @@ int main(int argc, char *argv[])
     int uniqueSymbolCount = 0;
     // Histograming the frequency of bytes.
     unsigned short readBuf;
-    unsigned char *readBufPtr;
-    readBufPtr = (unsigned char *)&readBuf;
 
     bool isOdd = originalFileSize % 2 == 1;
     unsigned char lastByte = 0;
-    originalFilePtr = fopen(argv[1], "rb");
 
     for (int i = 0; i < originalFileSize / 2; i++)
     {
-        fread(readBufPtr, 2, 1, originalFilePtr);
+        originalFile.read(reinterpret_cast<char *>(&readBuf), sizeof(readBuf));
         freqCount[readBuf]++;
 
-        char first = readBuf >> 8;
-        char second = readBuf & 0xFF;
-        std::cout << "Current byte in hex: " << hex << (int)first << " " << (int)second << endl;
+        unsigned char first = readBuf >> 8;
+        unsigned char second = readBuf & 0xFF;
+        cout << "Current byte in hex: " << hex << static_cast<int>(first) << " " << static_cast<int>(second) << endl;
     }
 
     if (isOdd) {
-        fread(&lastByte, 1, 1, originalFilePtr);
-        std::cout << "Last byte: " << hex << (int)lastByte << endl;
+        originalFile.read(reinterpret_cast<char *>(&lastByte), sizeof(lastByte));
+        std::cout << "Last byte: " << hex << static_cast<int>(lastByte) << endl;
     }
-
-    fclose(originalFilePtr);
 
     // Traverse through all possible bytes and count the number of unique bytes.
     for (long int *i = freqCount; i < freqCount + 65536; i++)
