@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <iomanip>
 #include <vector>
+#include <cuda_runtime.h>
 
 using namespace std;
 
@@ -32,6 +33,15 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
     return a.occurrences < b.occurrences;
 }
 
+__global__ void calculateFrequency(const unsigned char* data, long int size, unsigned int* freqCount) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < size / 2; i += stride) {
+        unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
+        atomicAdd(&freqCount[readBuf], 1);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -52,27 +62,38 @@ int main(int argc, char *argv[])
     long int originalFileSize = originalFile.tellg();
     originalFile.seekg(0, ios::beg);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
-
-    long int freqCount[65536] = {0};
-    int uniqueSymbolCount = 0;
+    
     // Histograming the frequency of bytes.
-    unsigned short readBuf;
     bool isOdd = originalFileSize % 2 == 1;
     unsigned char lastByte = 0;
 
     std::vector<unsigned char> fileData(originalFileSize);
-    originalFile.read(reinterpret_cast<char*>(&fileData[0]), originalFileSize);
+    originalFile.read(reinterpret_cast<char *>(&fileData[0]), originalFileSize);
     originalFile.close();
-
-    for (int i = 0; i < originalFileSize / 2; i++) {
-        readBuf = (fileData[i * 2 + 1] << 8) | fileData[i * 2];
-        freqCount[readBuf]++;
-    }
 
     if (isOdd) {
         lastByte = fileData[originalFileSize - 1];
     }
 
+    unsigned char* d_fileData;
+    unsigned int* d_freqCount;
+    cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
+    cudaMalloc(&d_freqCount, 65536 * sizeof(unsigned int));
+    cudaMemset(d_freqCount, 0, 65536 * sizeof(unsigned int));
+
+    cudaMemcpy(d_fileData, fileData.data(), originalFileSize * sizeof(unsigned char), cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
+    calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_freqCount);
+
+    unsigned int freqCount[65536];
+    cudaMemcpy(freqCount, d_freqCount, 65536 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
+    cudaFree(d_fileData);
+    cudaFree(d_freqCount);
+
+    unsigned int uniqueSymbolCount = 0;
     for (int i = 0; i < 65536; i++)
     {
         if (freqCount[i])
@@ -89,7 +110,7 @@ int main(int argc, char *argv[])
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
-    for (long int *frequency = freqCount; frequency < freqCount + 65536; frequency++)
+    for (unsigned int *frequency = freqCount; frequency < freqCount + 65536; frequency++)
     {
         if (*frequency)
         {
