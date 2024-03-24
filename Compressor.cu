@@ -23,7 +23,7 @@ void writeIfFullBuffer(unsigned char &, int &, FILE *);
 struct TreeNode
 { // this structure will be used to create the translation tree
     TreeNode *left, *right;
-    long int occurrences;
+    unsigned int occurrences;
     unsigned short character;
     string bit;
 };
@@ -33,10 +33,12 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
     return a.occurrences < b.occurrences;
 }
 
-__global__ void calculateFrequency(const unsigned char* data, long int size, unsigned int* freqCount) {
+__global__ void calculateFrequency(const unsigned char *data, long int size, unsigned int *freqCount)
+{
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < size / 2; i += stride) {
+    for (int i = index; i < size / 2; i += stride)
+    {
         unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
         atomicAdd(&freqCount[readBuf], 1);
     }
@@ -62,7 +64,7 @@ int main(int argc, char *argv[])
     long int originalFileSize = originalFile.tellg();
     originalFile.seekg(0, ios::beg);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
-    
+
     // Histograming the frequency of bytes.
     bool isOdd = originalFileSize % 2 == 1;
     unsigned char lastByte = 0;
@@ -71,12 +73,13 @@ int main(int argc, char *argv[])
     originalFile.read(reinterpret_cast<char *>(&fileData[0]), originalFileSize);
     originalFile.close();
 
-    if (isOdd) {
+    if (isOdd)
+    {
         lastByte = fileData[originalFileSize - 1];
     }
 
-    unsigned char* d_fileData;
-    unsigned int* d_freqCount;
+    unsigned char *d_fileData;
+    unsigned int *d_freqCount;
     cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
     cudaMalloc(&d_freqCount, 65536 * sizeof(unsigned int));
     cudaMemset(d_freqCount, 0, 65536 * sizeof(unsigned int));
@@ -104,9 +107,13 @@ int main(int argc, char *argv[])
 
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
+    // Free unused memory.
+    fileData.clear();
+
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
     // Each leaf node represents a unique byte and its frequency in the input data.
-    TreeNode nodesForHuffmanTree[uniqueSymbolCount * 2 - 1];
+    // TreeNode nodesForHuffmanTree[uniqueSymbolCount * 2 - 1];
+    TreeNode *nodesForHuffmanTree = new TreeNode[uniqueSymbolCount * 2 - 1];
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
