@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <cstdio>
 #include <iomanip>
+#include <vector>
 
 using namespace std;
 
@@ -39,7 +40,6 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    FILE *originalFilePtr;
     ifstream originalFile(argv[1], ios::binary);
     if (!originalFile.is_open())
     {
@@ -48,36 +48,34 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    long int originalFileSize = sizeOfTheFile(argv[1]);
+    originalFile.seekg(0, ios::end);
+    long int originalFileSize = originalFile.tellg();
+    originalFile.seekg(0, ios::beg);
     std::cout << "The size of the sum of ORIGINAL files is: " << originalFileSize << " bytes" << endl;
 
     long int freqCount[65536] = {0};
     int uniqueSymbolCount = 0;
     // Histograming the frequency of bytes.
     unsigned short readBuf;
-
     bool isOdd = originalFileSize % 2 == 1;
     unsigned char lastByte = 0;
 
-    for (int i = 0; i < originalFileSize / 2; i++)
-    {
-        originalFile.read(reinterpret_cast<char *>(&readBuf), sizeof(readBuf));
-        freqCount[readBuf]++;
+    std::vector<unsigned char> fileData(originalFileSize);
+    originalFile.read(reinterpret_cast<char*>(&fileData[0]), originalFileSize);
+    originalFile.close();
 
-        unsigned char first = readBuf >> 8;
-        unsigned char second = readBuf & 0xFF;
-        cout << "Current byte in hex: " << hex << static_cast<int>(first) << " " << static_cast<int>(second) << endl;
+    for (int i = 0; i < originalFileSize / 2; i++) {
+        readBuf = (fileData[i * 2 + 1] << 8) | fileData[i * 2];
+        freqCount[readBuf]++;
     }
 
     if (isOdd) {
-        originalFile.read(reinterpret_cast<char *>(&lastByte), sizeof(lastByte));
-        std::cout << "Last byte: " << hex << static_cast<int>(lastByte) << endl;
+        lastByte = fileData[originalFileSize - 1];
     }
 
-    // Traverse through all possible bytes and count the number of unique bytes.
-    for (long int *i = freqCount; i < freqCount + 65536; i++)
+    for (int i = 0; i < 65536; i++)
     {
-        if (*i)
+        if (freqCount[i])
         {
             uniqueSymbolCount++;
         }
@@ -221,8 +219,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    originalFilePtr = fopen(argv[1], "rb");
-
+    FILE *originalFilePtr = fopen(argv[1], "rb");
     // Writing the size of the file, its name, and its content in the compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
     writeFileContent(originalFilePtr, originalFileSize, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
