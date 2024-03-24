@@ -8,6 +8,9 @@
 #include <sys/time.h>
 
 #include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -466,7 +469,7 @@ __global__ void GenerateCW(Node const* nodes, uint8_t* CW, int size,
     }
 }
 
-int main(int argc, char* argv[]) {
+void test_serial_merge() {
     int n = 100;
     int na = 10;
     int nb = 10;
@@ -513,4 +516,101 @@ int main(int argc, char* argv[]) {
         int2 kth = KthElement(b.data(), b.size(), a.data(), a.size(), 8);
         printf("%d %d\n", kth.y, kth.x);
     }
+}
+
+__global__ void calculateFrequency(const unsigned char* data, long int size,
+                                   unsigned int* freqCount) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < size / 2; i += stride) {
+        unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
+        atomicAdd(&freqCount[readBuf], 1);
+    }
+}
+
+class GpuCodewords {
+   public:
+    GpuCodewords(int codeLengthPerWord, int symbolSize)
+        : _codeLengthPerWord(codeLengthPerWord), _symbolSize(symbolSize) {
+        uint8_t* codewords;
+        cuda_check(cudaMalloc(
+            &codewords, sizeof(uint8_t) * codeLengthPerWord * symbolSize));
+        auto CudaFree = [](uint8_t* pointer) { cuda_check(cudaFree(pointer)); };
+        _codewords = {codewords, CudaFree};
+    }
+
+    std::vector<std::string> toCpu() {
+        std::vector<std::string> transformationStrings;
+        return transformationStrings;
+    }
+
+    uint8_t const* pointer() const { return _codewords.get(); }
+    uint8_t* pointer() { return _codewords.get(); }
+
+   private:
+    int _codeLengthPerWord;
+    int _symbolSize;
+    std::unique_ptr<uint8_t, std::function<void(uint8_t*)>> _codewords;
+};
+
+GpuCodewords gpuCodebookConstruction(unsigned int* frequencies,
+                                     int symbolSize) {
+    return GpuCodewords(8, symbolSize);
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cout << "Must provide a single file name." << std::endl;
+        return 0;
+    }
+
+    int symbolSize = 65536;
+
+    std::ifstream originalFile(argv[1], std::ios::binary);
+    if (!originalFile.is_open()) {
+        std::cout << argv[1] << " file does not exist" << std::endl
+                  << "Process has been terminated" << std::endl;
+        return 0;
+    }
+
+    originalFile.seekg(0, std::ios::end);
+    long int originalFileSize = originalFile.tellg();
+    originalFile.seekg(0, std::ios::beg);
+    std::cout << "The size of the sum of ORIGINAL files is: "
+              << originalFileSize << " bytes" << std::endl;
+
+    // Histograming the frequency of bytes.
+    bool isOdd = originalFileSize % 2 == 1;
+    unsigned char lastByte = 0;
+
+    std::vector<unsigned char> fileData(originalFileSize);
+    originalFile.read(reinterpret_cast<char*>(&fileData[0]), originalFileSize);
+    originalFile.close();
+
+    if (isOdd) {
+        lastByte = fileData[originalFileSize - 1];
+    }
+
+    unsigned char* d_fileData;
+    unsigned int* d_freqCount;
+    cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
+    cudaMalloc(&d_freqCount, symbolSize * sizeof(unsigned int));
+    cudaMemset(d_freqCount, 0, symbolSize * sizeof(unsigned int));
+
+    cudaMemcpy(d_fileData, fileData.data(),
+               originalFileSize * sizeof(unsigned char),
+               cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
+    calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
+                                                 d_freqCount);
+
+    std::vector<unsigned> freqCount(symbolSize);
+    cudaMemcpy(freqCount.data(), d_freqCount, symbolSize * sizeof(unsigned int),
+               cudaMemcpyDeviceToHost);
+    std::sort(freqCount.begin(), freqCount.end());
+
+    cudaFree(d_fileData);
+    cudaFree(d_freqCount);
 }
