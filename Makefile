@@ -1,10 +1,12 @@
+CC=/usr/local/cuda-12.2/bin/nvcc
+
 all : archive extract
 
 archive : Compressor.cu
-	nvcc -o archive Compressor.cu
+	${CC} -o archive Compressor.cu
 
 extract : Decompressor.cu
-	nvcc -o extract Decompressor.cu
+	${CC} -o extract Decompressor.cu
 
 clean :
 	@rm -f archive
