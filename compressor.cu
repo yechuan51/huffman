@@ -164,17 +164,20 @@ __host__ __device__ __forceinline__ int2 KthElement(F const* leftFreq,
     int kth = k;
     int leftIndex = 0;
     int rightIndex = 0;
-    leftSize = leftSize - 1;
-    rightSize = rightSize - 1;
 
     for (;;) {
         if (leftSize == leftIndex) {
-            return make_int2(leftIndex, rightIndex + kth);
+            return make_int2(-1, rightIndex + kth);
         } else if (rightSize == rightIndex) {
-            return make_int2(leftIndex + kth, rightIndex);
+            return make_int2(leftIndex + kth, -1);
         }
         int mid1 = leftIndex + (leftSize - leftIndex) / 2;
         int mid2 = rightIndex + (rightSize - rightIndex) / 2;
+#ifndef __CUDA_ARCH__
+        printf("k %d idx %d %d mid %d %d size %d %d freq %u %u\n", kth,
+               leftIndex, rightIndex, mid1, mid2, leftSize, rightSize,
+               leftFreq[leftIndex], rightFreq[rightIndex]);
+#endif
         if (mid1 - leftIndex + mid2 - rightIndex < kth) {
             if (leftFreq[mid1] > rightFreq[mid2]) {
                 kth = kth - (mid2 - rightIndex) - 1;
@@ -213,7 +216,7 @@ __host__ __device__ __forceinline__ int2 KthElement(F const* leftFreq,
 //         pivotIndex = BinarySearch(otherFreq + otherIndex, otherSize, pivot);
 //         if (pivotIndex < kth) {
 //             if (pivotIndex == 0 && otherFreq[otherIndex] < pivot) {
-//                 otherIndex = otherIndex + 1;
+//                 otherIndex = -1;
 //                 thisIndex = thisIndex + kth - 1;
 //                 break;
 //             }
@@ -221,6 +224,7 @@ __host__ __device__ __forceinline__ int2 KthElement(F const* leftFreq,
 //             otherSize -= pivotIndex;
 //             otherIndex += pivotIndex;
 //         } else if (pivotIndex >= kth) {
+//             thisIndex = -1;
 //             otherIndex = otherIndex + kth;
 //             break;
 //         }
@@ -243,7 +247,7 @@ __host__ __device__ __forceinline__ int2 KthElement(F const* leftFreq,
 //         return make_int2(otherIndex, thisIndex);
 //     }
 // }
-//
+
 template <typename F>
 __device__ __forceinline__ void ParallelMerge(
     F const* leftFreq, int const* leftIndex, int leftSize, F const* rightFreq,
@@ -253,54 +257,108 @@ __device__ __forceinline__ void ParallelMerge(
     int bid = blockIdx.x;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (tid < participants) {
-        int2 kth = make_int2(0, 0);
-        if (tid >= 1) {
-            kth = KthElement(leftFreq, leftSize, rightFreq, rightSize,
-                             tid * mergePerThread);
-        }
-        partitionIndex[tid] = kth;
-    }
+#if SERIAL_MERGE
+    if (tid == 0) {
+        int i = 0;
+        int j = 0;
+        int k = 0;
 
-    barrier.fence();
+        while (i < leftSize || j < rightSize) {
+            if (i >= leftSize) {
+                mergeFreq[k] = rightFreq[j];
+                mergeIndex[k] = rightIndex[j];
+                j++;
+                k++;
+            } else if (j >= rightSize) {
+                mergeFreq[k] = leftFreq[i];
+                mergeIndex[k] = leftIndex[i];
+                i++;
+                k++;
+            } else if (leftFreq[i] < rightFreq[j]) {
+                mergeFreq[k] = leftFreq[i];
+                mergeIndex[k] = leftIndex[i];
+                i++;
+                k++;
+            } else {
+                mergeFreq[k] = rightFreq[j];
+                mergeIndex[k] = rightIndex[j];
+                j++;
+                k++;
+            }
+        }
+    }
+#else
+
+    // if (tid < participants) {
+    // int2 kth = make_int2(0, 0);
+    // if (tid >= 1) {
+    //     kth = KthElement(leftFreq, leftSize, rightFreq, rightSize,
+    //                      tid * mergePerThread);
+    //     }
+    //     partitionIndex[tid] = kth;
+    // }
+
+    // barrier.fence();
     if (tid < participants) {
-        int2 start = partitionIndex[tid];
-        int2 end = tid < participants - 1
-                       ? partitionIndex[tid + 1]
-                       : make_int2(leftSize - 1, rightSize - 1);
+        //   int2 start = partitionIndex[tid];
+        //   int2 end = tid < participants - 1
+        //                  ? partitionIndex[tid + 1]
+        //                  : make_int2(leftSize - 1, rightSize - 1);
         int i = tid * mergePerThread;
+        //
+        int2 start = KthElement(leftFreq, leftSize, rightFreq, rightSize,
+                                tid * mergePerThread);
+
+        // int2 end = KthElement(leftFreq, leftSize, rightFreq, rightSize,
+        //                       tid * mergePerThread + 1);
+
         // if (start.x >= leftSize || start.y >= rightSize) {
         // //  printf("tid %d, %d %d\n", threadIdx.x, start.x, start.y);
         // }
         // if (end.x >= leftSize || end.y >= rightSize) {
-        // printf("tid %d, %d %d %d %d x, %d y, %d \n", threadIdx.x, end.x, end.y,
+        // printf("tid %d, %d %d %d %d x, %d y, %d \n", threadIdx.x, end.x,
+        // end.y,
         //        leftSize, rightSize, start.x + start.y, end.x + end.y);
         // }
+        // if (tid == 139 || tid == 140 || tid == 141) {
+        // printf("%d %d\n", start.x, start.y);
+        // printf("%d %d\n", leftFreq[0], rightFreq[0]);
+        // }
 
-        while (start.x < end.x or start.y < end.y) {
-            if (start.x >= end.x) {
-                mergeFreq[i] = rightFreq[start.y];
-                mergeIndex[i] = rightIndex[start.y];
-                start.y++;
-                i++;
-            } else if (start.y >= end.y) {
-                mergeFreq[i] = leftFreq[start.x];
-                mergeIndex[i] = leftIndex[start.x];
-                start.x++;
-                i++;
-            } else if (leftFreq[start.x] < rightFreq[start.y]) {
-                mergeFreq[i] = leftFreq[start.x];
-                mergeIndex[i] = leftIndex[start.x];
-                start.x++;
-                i++;
-            } else {
-                mergeFreq[i] = rightFreq[start.y];
-                mergeIndex[i] = rightIndex[start.y];
-                start.y++;
-                i++;
-            }
+        if (start.x == -1) {
+            mergeFreq[i] = rightFreq[start.y];
+            mergeIndex[i] = rightIndex[start.y];
+        } else {
+            mergeFreq[i] = leftFreq[start.x];
+            mergeIndex[i] = leftIndex[start.x];
         }
+
+        // while (i < (tid + 1) * mergePerThread) {
+        // if (start.x >= leftSize || start.x >= end.x) {
+        //     mergeFreq[i] = rightFreq[start.y];
+        //     mergeIndex[i] = rightIndex[start.y];
+        //     start.y++;
+        //     i++;
+        //     } else if (start.y >= rightSize || start.y >= end.y) {
+        //         mergeFreq[i] = leftFreq[start.x];
+        //         mergeIndex[i] = leftIndex[start.x];
+        //         start.x++;
+        //         i++;
+        //     } else if (leftFreq[start.x] < rightFreq[start.y]) {
+        //         mergeFreq[i] = leftFreq[start.x];
+        //         mergeIndex[i] = leftIndex[start.x];
+        //         start.x++;
+        //         i++;
+        //     } else {
+        //         mergeFreq[i] = rightFreq[start.y];
+        //         mergeIndex[i] = rightIndex[start.y];
+        //         start.y++;
+        //         i++;
+        //     }
+        // }
     }
+#endif
+    barrier.fence();
 }
 
 template <typename F, int kThreadsPerBlock>
@@ -332,12 +390,13 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
     int sizeLeft = size;
     while (sizeLeft > 1) {
         F specFreq = nodeFreq[0] + nodeFreq[1];
-        //        if (tid == 0) printf("%d %d %d\n", nodeFreq[0], nodeFreq[1],
-        //        specFreq);
+        //    if (tid == 0) printf("%d %d %d\n", nodeFreq[0], nodeFreq[1],
+        //    specFreq);
 
         int pivot = BinarySearch(nodeFreq + 2, sizeLeft - 2, specFreq);
         pivot += 2;
         pivot = pivot - (pivot & 0x1);
+        //  if (tid == 0) printf("%d\n", pivot);
 
         if (tid < sizeLeft - pivot) {
             tempFreq[tid] = nodeFreq[tid + pivot];
@@ -379,7 +438,7 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         numCurrentNodes += (pivot >> 1);
 
         barrier.fence();
-
+        //        c++;
         int mergePerThread = 1;
         int mergeSize = sizeLeft - pivot + (pivot >> 1);
         int participants = (mergeSize + mergePerThread - 1) / mergePerThread;
@@ -390,7 +449,7 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
 
         sizeLeft = sizeLeft - pivot + (pivot >> 1);
 
-        //        if (tid == 0) printf("sizeLeft %d \n", sizeLeft);
+        // if (tid == 0) printf("sizeLeft %d \n", sizeLeft);
         barrier.fence();
     }
     int threadIndex = threadIdx.x;
@@ -478,7 +537,6 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         }
         if (threadIndex == 0) {
             *maxCL = val;
-            //    printf("max %d\n", val);
         }
     }
 }
@@ -501,7 +559,7 @@ __global__ void GenerateCW(Node const* nodes, uint8_t* CW, int size,
             *reinterpret_cast<int4*>(&cur) = *pointer;
             if (child == cur.left) {
                 cw[length] = 0;
-            } else {
+            } else if (child == cur.right) {
                 cw[length] = 1;
             }
             child = parent;
@@ -576,8 +634,33 @@ class GpuCodewords {
         _codewords = {codewords, CudaFree};
     }
 
-    std::vector<std::string> toCpu() {
+    std::vector<std::string> toCpu(int* CL) {
         std::vector<std::string> transformationStrings;
+        int* h_CL = (int*)malloc(sizeof(int) * _symbolSize);
+        uint8_t* h_codewords = (uint8_t*)(malloc(
+            sizeof(uint8_t) * _codeLengthPerWord * _symbolSize));
+        cuda_check(
+            cudaMemcpy(h_codewords, pointer(),
+                       sizeof(uint8_t) * _codeLengthPerWord * _symbolSize,
+                       cudaMemcpyDeviceToHost));
+        cuda_check(cudaMemcpy(h_CL, CL, sizeof(int) * _symbolSize,
+                              cudaMemcpyDeviceToHost));
+        for (int i = 0; i < _symbolSize; ++i) {
+            int length = h_CL[i];
+            std::string codeString;
+            for (int j = 0; j < length; j++) {
+                uint8_t code = h_codewords[i * _codeLengthPerWord + j];
+                if (code == 0) {
+                    codeString += "1";
+                } else if (code == 1) {
+                    codeString += "0";
+                }
+            }
+            std::reverse(codeString.begin(), codeString.end());
+            transformationStrings.push_back(codeString);
+        }
+        free(h_codewords);
+        free(h_CL);
         return transformationStrings;
     }
 
@@ -649,9 +732,9 @@ class GpuHuffmanWorkspace {
     GpuMemory<int> _workspace;
 };
 
-GpuCodewords gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
-                                     GpuHuffmanWorkspace workspace,
-                                     cudaStream_t stream) {
+auto gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
+                             GpuHuffmanWorkspace workspace,
+                             cudaStream_t stream) {
     {
         static constexpr int kThreadsPerBlock = 256;
         dim3 blockDim((symbolSize + kThreadsPerBlock - 1) / kThreadsPerBlock);
@@ -670,6 +753,49 @@ GpuCodewords gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
     cuda_check(cudaMemcpyAsync(&maxCL, workspace.maxCL(), sizeof(int),
                                cudaMemcpyDeviceToHost, stream));
     cuda_check(cudaStreamSynchronize(stream));
+    if (false && debug) {
+        printf("write file\n");
+        unsigned* h_nodeFreq = new unsigned[symbolSize];
+        unsigned* h_tempFreq = new unsigned[symbolSize];
+        int* h_nodeIndex = new int[symbolSize];
+        int* h_tempIndex = new int[symbolSize];
+        cuda_check(cudaMemcpy(h_nodeFreq, workspace.nodeFreq(),
+                              sizeof(unsigned) * symbolSize,
+                              cudaMemcpyDeviceToHost));
+        cuda_check(cudaMemcpy(h_tempFreq, workspace.tempFreq(),
+                              sizeof(unsigned) * symbolSize,
+                              cudaMemcpyDeviceToHost));
+        cuda_check(cudaMemcpy(h_nodeIndex, workspace.nodeIndex(),
+                              sizeof(int) * symbolSize,
+                              cudaMemcpyDeviceToHost));
+        cuda_check(cudaMemcpy(h_tempIndex, workspace.tempIndex(),
+                              sizeof(int) * symbolSize,
+                              cudaMemcpyDeviceToHost));
+        auto dump = [&](int k, unsigned* data, int size) {
+            std::string file = std::to_string(k) + ".txt";
+            FILE* f = fopen(file.c_str(), "w");
+            int cnt = 0;
+            for (int i = 0; i < symbolSize; ++i) {
+                if (data[i] == 0) continue;
+                if (data[i] == 8) cnt++;
+                fprintf(f, "%u\n", data[i]);
+            }
+            fclose(f);
+            printf("%d %d\n", k, cnt);
+        };
+        static int i = 0;
+        i++;
+        dump(i, h_nodeFreq, symbolSize);
+        i++;
+        auto kth = KthElement(h_tempFreq, 116, h_tempFreq, 70, 139);
+        printf("%d %d\n", kth.x, kth.y);
+        printf("%u\n", h_tempFreq[70]);
+        dump(i, h_tempFreq, symbolSize);
+        i++;
+        std::sort(h_tempFreq, h_tempFreq + symbolSize);
+        dump(i, h_tempFreq, symbolSize);
+    }
+
     printf("maxCL %d\n", maxCL);
     int codeLengthPerWord = maxCL;
     auto codewords = GpuCodewords(codeLengthPerWord, symbolSize);
@@ -684,7 +810,7 @@ GpuCodewords gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
             codeLengthPerWord);
         cuda_check(cudaGetLastError());
     }
-    return codewords;
+    return codewords.toCpu(workspace.CL());
 }
 
 int main(int argc, char* argv[]) {
@@ -738,17 +864,31 @@ int main(int argc, char* argv[]) {
     std::vector<unsigned> freqCount(symbolSize);
     cudaMemcpy(freqCount.data(), d_freqCount, symbolSize * sizeof(unsigned int),
                cudaMemcpyDeviceToHost);
-    std::sort(freqCount.begin(), freqCount.end());
 
+    std::sort(
+        freqCount.begin(), freqCount.end(),
+        [](unsigned int const& a, unsigned int const& b) { return a < b; });
+    int uniqueSymbolCount = 0;
+    for (auto const& i : freqCount) {
+        if (i > 0) {
+            uniqueSymbolCount++;
+        }
+    }
+    printf("%d\n", uniqueSymbolCount);
+    //    uniqueSymbolCount = 256;
     cudaMemcpy(d_freqCount, freqCount.data(), symbolSize * sizeof(unsigned int),
                cudaMemcpyHostToDevice);
 
     // test_serial_merge();
     static constexpr int kThreadsPerBlock = 256;
-    GpuHuffmanWorkspace workspace(symbolSize, kThreadsPerBlock);
-    auto codebook = gpuCodebookConstruction(d_freqCount, symbolSize,
-                                            std::move(workspace), 0);
+    GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);
+    auto codebook =
+        gpuCodebookConstruction(d_freqCount + symbolSize - uniqueSymbolCount,
+                                uniqueSymbolCount, std::move(workspace), 0);
 
+    for (int i = 0; i < codebook.size(); ++i) {
+        printf("%s\n", codebook[i].c_str());
+    }
     cuda_check(cudaFree(d_fileData));
     cuda_check(cudaFree(d_freqCount));
 }
