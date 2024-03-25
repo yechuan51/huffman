@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "gpuHuffmanConstruction.h"
+
 using namespace std;
 
 void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
@@ -43,18 +45,13 @@ __global__ void calculateFrequency(const unsigned char *data, long int size,
     }
 }
 
-double getTimeStamp() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (double)tv.tv_usec / 1000000 + tv.tv_sec;
-}
-
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         std::cout << "Must provide a single file name." << endl;
         return 0;
     }
 
+    static constexpr int kMaxSymbolSize = 65536;
     ifstream originalFile(argv[1], ios::binary);
     if (!originalFile.is_open()) {
         std::cout << argv[1] << " file does not exist" << endl
@@ -83,8 +80,8 @@ int main(int argc, char *argv[]) {
     unsigned char *d_fileData;
     unsigned int *d_freqCount;
     cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
-    cudaMalloc(&d_freqCount, 65536 * sizeof(unsigned int));
-    cudaMemset(d_freqCount, 0, 65536 * sizeof(unsigned int));
+    cudaMalloc(&d_freqCount, kMaxSymbolSize * sizeof(unsigned int));
+    cudaMemset(d_freqCount, 0, kMaxSymbolSize * sizeof(unsigned int));
 
     cudaMemcpy(d_fileData, fileData.data(),
                originalFileSize * sizeof(unsigned char),
@@ -95,12 +92,11 @@ int main(int argc, char *argv[]) {
     calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
                                                  d_freqCount);
 
-    unsigned int freqCount[65536];
-    cudaMemcpy(freqCount, d_freqCount, 65536 * sizeof(unsigned int),
-               cudaMemcpyDeviceToHost);
+    std::vector<unsigned int> freqCount(kMaxSymbolSize);
+    cudaMemcpy(freqCount.data(), d_freqCount,
+               kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
     cudaFree(d_fileData);
-    cudaFree(d_freqCount);
 
     unsigned int uniqueSymbolCount = 0;
     for (int i = 0; i < 65536; i++) {
@@ -113,6 +109,7 @@ int main(int argc, char *argv[]) {
     // Free unused memory.
     fileData.clear();
 
+    // TODO: Remove this
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
     // Each leaf node represents a unique byte and its frequency in the input
     // data. TreeNode nodesForHuffmanTree[uniqueSymbolCount * 2 - 1];
@@ -120,13 +117,13 @@ int main(int argc, char *argv[]) {
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
-    for (unsigned int *frequency = freqCount; frequency < freqCount + 65536;
-         frequency++) {
+    for (unsigned int *frequency = freqCount.data();
+         frequency < freqCount.data() + kMaxSymbolSize; frequency++) {
         if (*frequency) {
             currentNode->right = NULL;
             currentNode->left = NULL;
             currentNode->occurrences = *frequency;
-            currentNode->character = frequency - freqCount;
+            currentNode->character = frequency - freqCount.data();
             currentNode++;
         }
     }
@@ -136,76 +133,24 @@ int main(int argc, char *argv[]) {
     sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount,
          TreeNodeCompare);
 
-    double start_time = getTimeStamp();
+    std::sort(
+        freqCount.begin(), freqCount.end(),
+        [](unsigned int const &a, unsigned int const &b) { return a < b; });
 
-    // Step 4: Construct the Huffman tree by merging nodes with the lowest
-    // frequencies.
-    TreeNode *smallestNode = nodesForHuffmanTree;
-    TreeNode *secondSmallestNode = nodesForHuffmanTree + 1;
-    TreeNode *newInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
-    TreeNode *nextInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
-    TreeNode *nextLeafNode = nodesForHuffmanTree + 2;
-    for (int i = 0; i < uniqueSymbolCount - 1; i++) {
-        // Create a new internal node that combines the two smallest nodes.
-        newInternalNode->occurrences =
-            smallestNode->occurrences + secondSmallestNode->occurrences;
-        newInternalNode->left = smallestNode;
-        newInternalNode->right = secondSmallestNode;
-        // Assign bits for tree navigation: '1' for the path to smallestNode,
-        // '0' for secondSmallestNode.
-        smallestNode->bit = "1";
-        secondSmallestNode->bit = "0";
-        newInternalNode++;
+    cudaMemcpy(d_freqCount, freqCount.data(),
+               kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
-        // Update smallestNode and secondSmallestNode for the next iteration.
-        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount) {
-            // All leaf nodes have been processed; proceed with internal nodes.
-            smallestNode = nextInternalNode;
-            nextInternalNode++;
-        } else {
-            // Choose the next smallest node from the leaf or internal nodes.
-            smallestNode =
-                (nextLeafNode->occurrences < nextInternalNode->occurrences)
-                    ? nextLeafNode++
-                    : nextInternalNode++;
-        }
+    static constexpr int kThreadsPerBlock = 256;
 
-        // Repeat the process for secondSmallestNode.
-        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount) {
-            secondSmallestNode = nextInternalNode;
-            nextInternalNode++;
-        } else if (nextInternalNode >= newInternalNode) {
-            secondSmallestNode = nextLeafNode;
-            nextLeafNode++;
-        } else {
-            secondSmallestNode =
-                (nextLeafNode->occurrences < nextInternalNode->occurrences)
-                    ? nextLeafNode++
-                    : nextInternalNode++;
-        }
-    }
+    // Step 1: Initialize workspace
+    GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);
 
-    // Step 5: Assign Huffman codes to each node.
-    // Iterate from the last internal node to the root, building the Huffman
-    // codes in reverse.
-    for (TreeNode *node = nodesForHuffmanTree + uniqueSymbolCount * 2 - 2;
-         node > nodesForHuffmanTree - 1; node--) {
-        // If a left child exists, concatenate the current node's code to it.
-        // This assigns the '0' path.
-        if (node->left) {
-            node->left->bit = node->bit + node->left->bit;
-        }
+    // Step 2: Gpu Code Word construction
+    auto codewords = gpuCodebookConstruction(
+        d_freqCount + kMaxSymbolSize - uniqueSymbolCount, uniqueSymbolCount,
+        std::move(workspace), 0);
 
-        // Similar operation for the right child, representing the '1' path.
-        if (node->right) {
-            node->right->bit = node->bit + node->right->bit;
-        }
-    }
-
-    double end_time = getTimeStamp();
-    double construct_time_ms = (end_time - start_time) * 1000.0;
-    printf("construction time: %.3f ms, symbols/s: %.3f\n", construct_time_ms,
-           (float)(uniqueSymbolCount) / (construct_time_ms * 1e-3));
+    cuda_check(cudaFree(d_freqCount));
 
     string scompressed = argv[1];
     scompressed += ".compressed";
@@ -229,16 +174,19 @@ int main(int argc, char *argv[]) {
     // Array to store transformation strings for each unique character to
     // optimize compression.
 
-    string transformationStrings[65536];
+    std::vector<std::string> transformationStrings(kMaxSymbolSize);
     // Iterate through each node in the Huffman tree to write transformation
     // codes to the compressed file.
-    for (TreeNode *node = nodesForHuffmanTree;
-         node < nodesForHuffmanTree + uniqueSymbolCount; node++) {
+    int nodeIndex = 0;
+    for (auto const &CW : codewords) {
         // Store the transformation string for the current character in the
         // array.
-        transformationStrings[node->character] = node->bit;
-        unsigned char transformationLength = node->bit.length();
-        unsigned short currentCharacter = node->character;
+        auto node = nodesForHuffmanTree[nodeIndex];
+        nodeIndex++;
+        auto character = node.character;
+        transformationStrings[character] = CW;
+        unsigned char transformationLength = CW.length();
+        unsigned short currentCharacter = character;
 
         // Write the current character and its transformation string length
         // to the compressed file.
@@ -249,7 +197,7 @@ int main(int argc, char *argv[]) {
 
         // Write the transformation string bit by bit to the compressed
         // file.
-        char *transformationStringPtr = &node->bit[0];
+        char const *transformationStringPtr = &CW[0];
         while (*transformationStringPtr) {
             bufferByte <<= 1;
             if (*transformationStringPtr == '1') {
@@ -262,15 +210,16 @@ int main(int argc, char *argv[]) {
     }
 
     FILE *originalFilePtr = fopen(argv[1], "rb");
-    // Writing the size of the file, its name, and its content in the compressed
-    // format.
+    // Writing the size of the file, its name, and its content in the
+    // compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
-    writeFileContent(originalFilePtr, originalFileSize, transformationStrings,
-                     bufferByte, bitCounter, compressedFilePtr);
+    writeFileContent(originalFilePtr, originalFileSize,
+                     transformationStrings.data(), bufferByte, bitCounter,
+                     compressedFilePtr);
     fclose(originalFilePtr);
 
-    // Ensuring the last byte is written to the compressed file by aligning the
-    // bit counter.
+    // Ensuring the last byte is written to the compressed file by aligning
+    // the bit counter.
     if (bitCounter > 0) {
         bufferByte <<= (8 - bitCounter);
         fwrite(&bufferByte, 1, 1, compressedFilePtr);
@@ -289,8 +238,8 @@ int main(int argc, char *argv[]) {
     std::cout << "Compressed file's size is [" << compressionRatio
               << "%] of the original files." << endl;
 
-    // Warning if the compressed file is unexpectedly larger than the original
-    // sum.
+    // Warning if the compressed file is unexpectedly larger than the
+    // original sum.
     if (compressedFileSize > originalFileSize) {
         std::cout << "\nWARNING: The compressed file's size is larger than the "
                      "sum of the originals.\n\n";
