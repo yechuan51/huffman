@@ -607,15 +607,15 @@ void test_serial_merge() {
     printf("%d %d\n", kth.x, kth.y);
 }
 
-__global__ void calculateFrequency(const unsigned char* data, long int size,
-                                   unsigned int* freqCount) {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < size / 2; i += stride) {
-        unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
-        atomicAdd(&freqCount[readBuf], 1);
-    }
-}
+//__global__ void calculateFrequency(const unsigned char* data, long int size,
+//                                   unsigned int* freqCount) {
+//    int index = blockIdx.x * blockDim.x + threadIdx.x;
+//    int stride = blockDim.x * gridDim.x;
+//    for (int i = index; i < size / 2; i += stride) {
+//        unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
+//        atomicAdd(&freqCount[readBuf], 1);
+//    }
+//}
 
 template <typename T>
 using GpuMemory = std::unique_ptr<T, std::function<void(void const*)>>;
@@ -819,83 +819,83 @@ auto gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
     return codewords.toCpu(workspace.CL());
 }
 
-int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        std::cout << "Must provide a single file name." << std::endl;
-        return 0;
-    }
-
-    int symbolSize = 65536;
-
-    std::ifstream originalFile(argv[1], std::ios::binary);
-    if (!originalFile.is_open()) {
-        std::cout << argv[1] << " file does not exist" << std::endl
-                  << "Process has been terminated" << std::endl;
-        return 0;
-    }
-
-    originalFile.seekg(0, std::ios::end);
-    long int originalFileSize = originalFile.tellg();
-    originalFile.seekg(0, std::ios::beg);
-    std::cout << "The size of the sum of ORIGINAL files is: "
-              << originalFileSize << " bytes" << std::endl;
-
-    // Histograming the frequency of bytes.
-    bool isOdd = originalFileSize % 2 == 1;
-    unsigned char lastByte = 0;
-
-    std::vector<unsigned char> fileData(originalFileSize);
-    originalFile.read(reinterpret_cast<char*>(&fileData[0]), originalFileSize);
-    originalFile.close();
-
-    if (isOdd) {
-        lastByte = fileData[originalFileSize - 1];
-    }
-
-    unsigned char* d_fileData;
-    unsigned int* d_freqCount;
-    cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
-    cudaMalloc(&d_freqCount, symbolSize * sizeof(unsigned int));
-    cudaMemset(d_freqCount, 0, symbolSize * sizeof(unsigned int));
-
-    cudaMemcpy(d_fileData, fileData.data(),
-               originalFileSize * sizeof(unsigned char),
-               cudaMemcpyHostToDevice);
-
-    int blockSize = 256;
-    int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
-    calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
-                                                 d_freqCount);
-
-    std::vector<unsigned> freqCount(symbolSize);
-    cudaMemcpy(freqCount.data(), d_freqCount, symbolSize * sizeof(unsigned int),
-               cudaMemcpyDeviceToHost);
-
-    std::sort(
-        freqCount.begin(), freqCount.end(),
-        [](unsigned int const& a, unsigned int const& b) { return a < b; });
-    int uniqueSymbolCount = 0;
-    for (auto const& i : freqCount) {
-        if (i > 0) {
-            uniqueSymbolCount++;
-        }
-    }
-    cudaMemcpy(d_freqCount, freqCount.data(), symbolSize * sizeof(unsigned int),
-               cudaMemcpyHostToDevice);
-
-    // test_serial_merge();
-    static constexpr int kThreadsPerBlock = 256;
-    GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);
-    auto codebook =
-        gpuCodebookConstruction(d_freqCount + symbolSize - uniqueSymbolCount,
-                                uniqueSymbolCount, std::move(workspace), 0);
-
-    //    if (verbose) {
-    //    for (int i = 0; i < codebook.size(); ++i) {
-    //        printf("%s\n", codebook[i].c_str());
-    //        }
-    //    }
-    cuda_check(cudaFree(d_fileData));
-    cuda_check(cudaFree(d_freqCount));
-}
+// int main(int argc, char* argv[]) {
+// if (argc != 2) {
+//     std::cout << "Must provide a single file name." << std::endl;
+//     return 0;
+//     }
+// 
+//     int symbolSize = 65536;
+// 
+//     std::ifstream originalFile(argv[1], std::ios::binary);
+//     if (!originalFile.is_open()) {
+//         std::cout << argv[1] << " file does not exist" << std::endl
+//                   << "Process has been terminated" << std::endl;
+//         return 0;
+//     }
+// 
+//     originalFile.seekg(0, std::ios::end);
+//     long int originalFileSize = originalFile.tellg();
+//     originalFile.seekg(0, std::ios::beg);
+//     std::cout << "The size of the sum of ORIGINAL files is: "
+//               << originalFileSize << " bytes" << std::endl;
+// 
+//     // Histograming the frequency of bytes.
+//     bool isOdd = originalFileSize % 2 == 1;
+//     unsigned char lastByte = 0;
+// 
+//     std::vector<unsigned char> fileData(originalFileSize);
+//     originalFile.read(reinterpret_cast<char*>(&fileData[0]), originalFileSize);
+//     originalFile.close();
+// 
+//     if (isOdd) {
+//         lastByte = fileData[originalFileSize - 1];
+//     }
+// 
+//     unsigned char* d_fileData;
+//     unsigned int* d_freqCount;
+//     cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
+//     cudaMalloc(&d_freqCount, symbolSize * sizeof(unsigned int));
+//     cudaMemset(d_freqCount, 0, symbolSize * sizeof(unsigned int));
+// 
+//     cudaMemcpy(d_fileData, fileData.data(),
+//                originalFileSize * sizeof(unsigned char),
+//                cudaMemcpyHostToDevice);
+// 
+//     int blockSize = 256;
+//     int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
+//     calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
+//                                                  d_freqCount);
+// 
+//     std::vector<unsigned> freqCount(symbolSize);
+//     cudaMemcpy(freqCount.data(), d_freqCount, symbolSize * sizeof(unsigned int),
+//                cudaMemcpyDeviceToHost);
+// 
+//     std::sort(
+//         freqCount.begin(), freqCount.end(),
+//         [](unsigned int const& a, unsigned int const& b) { return a < b; });
+//     int uniqueSymbolCount = 0;
+//     for (auto const& i : freqCount) {
+//         if (i > 0) {
+//             uniqueSymbolCount++;
+//         }
+//     }
+//     cudaMemcpy(d_freqCount, freqCount.data(), symbolSize * sizeof(unsigned int),
+//                cudaMemcpyHostToDevice);
+// 
+//     // test_serial_merge();
+//     static constexpr int kThreadsPerBlock = 256;
+//     GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);
+//     auto codebook =
+//         gpuCodebookConstruction(d_freqCount + symbolSize - uniqueSymbolCount,
+//                                 uniqueSymbolCount, std::move(workspace), 0);
+// 
+//     //    if (verbose) {
+//     //    for (int i = 0; i < codebook.size(); ++i) {
+//     //        printf("%s\n", codebook[i].c_str());
+//     //        }
+//     //    }
+//     cuda_check(cudaFree(d_fileData));
+//     cuda_check(cudaFree(d_freqCount));
+// }
 

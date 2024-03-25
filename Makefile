@@ -1,9 +1,12 @@
 CC=/usr/local/cuda-12.2/bin/nvcc
 
-all : archive extract
+all : archive extract gpu_archive
 
 archive : Compressor.cu
 	${CC} -o archive Compressor.cu
+
+gpu_archive : gpuCompressor.cu
+	${CC} -o $@ $< -arch sm_89 --ptxas-options=-v -I.
 
 extract : Decompressor.cu
 	${CC} -o extract Decompressor.cu
