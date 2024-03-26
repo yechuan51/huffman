@@ -14,6 +14,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <functional>
 
 static const bool pagelocked_mem = true;
 static const bool verbose = true;
@@ -731,13 +732,13 @@ class GpuHuffmanWorkspace {
     GpuMemory<int> _workspace;
 };
 
-auto gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
+std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
                              GpuHuffmanWorkspace workspace,
                              cudaStream_t stream) {
     timer tm(stream);
     tm.start();
     {
-        static constexpr int kThreadsPerBlock = 256;
+        static constexpr int kThreadsPerBlock = 1024;
         dim3 blockDim((symbolSize + kThreadsPerBlock - 1) / kThreadsPerBlock);
         dim3 threadDim(kThreadsPerBlock);
         cuda_check(cudaMemsetAsync(workspace.count(), 0, 2 * sizeof(int)));
