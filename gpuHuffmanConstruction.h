@@ -372,7 +372,7 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         int4* pointer = reinterpret_cast<int4*>(nodes + i);
         *pointer = *reinterpret_cast<int4*>(&nd);
         nodeFreq[i] = histogram[i];
-        nodeIndex[i] = tid;
+        nodeIndex[i] = i;
     }
     int numCurrentNodes = size;
     barrier.fence();
@@ -443,7 +443,6 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
 
         barrier.fence();
     }
-    int threadIndex = threadIdx.x;
     for (int i = tid; i < size; i += totalNumThreads) {
         int4* pointer = reinterpret_cast<int4*>(nodes + i);
         Node cur;
@@ -667,10 +666,30 @@ static int minmumPowOfTwo(int n) {
     n |= n >> 16;
     return n < 0 ? 1 : n + 1;
 }	
+//
+//static int queryOptimalThreadsPerBlock(int symbolSize) {
+//    cudaDeviceProp prop;
+//    cuda_check(cudaGetDeviceProperties(&prop, 0));
+//    int smCount = prop.multiProcessorCount;
+//    static constexpr int regsPerSM = 65536;
+//    static constexpr int regsPerThreadBlock = 64;
+//    int maxThreadsPerSM = regsPerSM / regsPerThreadBlock;
+//    int threadsPerBlock;
+//    int numBlocks;
+//    if (maxThreadsPerSM * smCount < symbolSize) {
+//        threadsPerBlock = prop.maxThreadsPerBlock;
+//        numBlocks = smCount;
+//    } else {
+//        cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<F>	
+//        threadsPerBlock = maxThreadsPerSM * smCount - symbolSize + 1;
+//        threadsPerBlock = std::min(prop.maxThreadsPerBlock, threadsPerBlock);
+//        threadsPerBlock = minmumPowOfTwo(threadsPerBlock);
+//        numBlocks = (symbolSize + threadsPerBlock - 1) / threadsPerBlock;
+//    }
+//}
 
 static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
-                             GpuHuffmanWorkspace workspace,
-                             cudaStream_t stream) {
+							GpuHuffmanWorkspace workspace, cudaStream_t stream) {
     timer tm(stream);
     tm.start();
     {
