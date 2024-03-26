@@ -140,7 +140,7 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(d_freqCount, freqCount.data(),
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
-    static constexpr int kThreadsPerBlock = 512;
+    static constexpr int kThreadsPerBlock = 1024;
 
     // Step 1: Initialize workspace
     GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);

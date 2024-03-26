@@ -264,10 +264,10 @@ template <typename F>
 __device__ __forceinline__ void ParallelMerge(
     F const* leftFreq, int const* leftIndex, int leftSize, F const* rightFreq,
     int const* rightIndex, int rightSize, F* mergeFreq, int* mergeIndex,
-    int participants, int mergePerThread, int2* partitionIndex,
-    Barrier& barrier) {
+    int mergePerThread, int2* partitionIndex, Barrier& barrier) {
     int bid = blockIdx.x;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int totalNumThreads = blockDim.x * gridDim.x;
 
 #if SERIAL_MERGE
     if (tid == 0) {
@@ -308,14 +308,11 @@ __device__ __forceinline__ void ParallelMerge(
     //    }
 
     //    barrier.fence();
-    if (tid < participants) {
-        int i = tid * mergePerThread;
-
+    for (int i = tid * mergePerThread; i < leftSize + rightSize; i += totalNumThreads * mergePerThread) {
         // int2 start = partitionIndex[tid];
         // int2 end = partitionIndex[tid + 1];
 
-        int2 start = KthElement(leftFreq, leftSize, rightFreq, rightSize,
-                                tid * mergePerThread);
+        int2 start = KthElement(leftFreq, leftSize, rightFreq, rightSize, i);
 
 #if MERGE_PER_THREADS_1
         if (start.x == -1) {
@@ -326,8 +323,7 @@ __device__ __forceinline__ void ParallelMerge(
             mergeIndex[i] = leftIndex[start.x];
         }
 #else
-        int2 end = KthElement(leftFreq, leftSize, rightFreq, rightSize,
-                              tid * mergePerThread + mergePerThread);
+        int2 end = KthElement(leftFreq, leftSize, rightFreq, rightSize, i + mergePerThread);
 
         for (; i < (tid + 1) * mergePerThread; ++i) {
             if (start.x >= end.x) {
@@ -354,7 +350,7 @@ __device__ __forceinline__ void ParallelMerge(
     //    barrier.fence();
 }
 
-template <typename F, int kThreadsPerBlock>
+template <typename F>
 __global__ void GenerateCL(int* CL, F const* histogram, int size,
                            /* global variables */ F* nodeFreq, F* tempFreq,
                            int* nodeIndex, int* tempIndex, Node* nodes,
@@ -364,18 +360,19 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
                            /* CL legnth */ int* reduceCL, int* maxCL) {
     int bid = blockIdx.x;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int totalNumThreads = gridDim.x * blockDim.x;
     Barrier barrier{count, gridDim.x, sense};
 
-    if (tid < size) {
+    for (int i = tid; i < size; i += totalNumThreads) {
         Node nd;
-        nd.index = tid;
+        nd.index = i;
         nd.left = -1;
         nd.right = -1;
         nd.parent = -1;
-        int4* pointer = reinterpret_cast<int4*>(nodes + tid);
+        int4* pointer = reinterpret_cast<int4*>(nodes + i);
         *pointer = *reinterpret_cast<int4*>(&nd);
-        nodeFreq[tid] = histogram[tid];
-        nodeIndex[tid] = tid;
+        nodeFreq[i] = histogram[i];
+        nodeIndex[i] = tid;
     }
     int numCurrentNodes = size;
     barrier.fence();
@@ -391,19 +388,19 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         pivot = pivot - (pivot & 0x1);
         //  if (tid == 0) printf("%d\n", pivot);
 
-        if (tid < sizeLeft - pivot) {
-            tempFreq[tid] = nodeFreq[tid + pivot];
-            tempIndex[tid] = nodeIndex[tid + pivot];
+	for (int i = tid; i < sizeLeft - pivot; i += totalNumThreads) {
+            tempFreq[i] = nodeFreq[i + pivot];
+            tempIndex[i] = nodeIndex[i + pivot];
         }
 
-        if (tid < (pivot >> 1)) {
-            int left = nodeIndex[tid * 2];
-            int right = nodeIndex[tid * 2 + 1];
+	for (int i = tid; i < (pivot >> 1); i += totalNumThreads) {
+            int left = nodeIndex[i * 2];
+            int right = nodeIndex[i * 2 + 1];
             {
                 Node node;
                 *reinterpret_cast<int4*>(&node) =
                     *reinterpret_cast<int4*>(&nodes[left]);
-                node.parent = numCurrentNodes + tid;
+                node.parent = numCurrentNodes + i;
                 *reinterpret_cast<int4*>(nodes + left) =
                     reinterpret_cast<int4&>(node);
             }
@@ -411,7 +408,7 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
                 Node node;
                 *reinterpret_cast<int4*>(&node) =
                     *reinterpret_cast<int4*>(&nodes[right]);
-                node.parent = numCurrentNodes + tid;
+                node.parent = numCurrentNodes + i;
                 *reinterpret_cast<int4*>(nodes + right) =
                     reinterpret_cast<int4&>(node);
             }
@@ -422,11 +419,11 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
             nd.right = right;
             nd.parent = -1;
             int4* pointer =
-                reinterpret_cast<int4*>(nodes + numCurrentNodes + tid);
+                reinterpret_cast<int4*>(nodes + numCurrentNodes + i);
             *pointer = reinterpret_cast<int4&>(nd);
-            tempFreq[sizeLeft - pivot + tid] =
-                nodeFreq[tid * 2] + nodeFreq[tid * 2 + 1];
-            tempIndex[sizeLeft - pivot + tid] = numCurrentNodes + tid;
+            tempFreq[sizeLeft - pivot + i] =
+                nodeFreq[i * 2] + nodeFreq[i * 2 + 1];
+            tempIndex[sizeLeft - pivot + i] = numCurrentNodes + i;
         }
         numCurrentNodes += (pivot >> 1);
 
@@ -437,10 +434,9 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         int mergePerThread = 4;
 #endif
         int mergeSize = sizeLeft - pivot + (pivot >> 1);
-        int participants = (mergeSize + mergePerThread - 1) / mergePerThread;
         ParallelMerge(tempFreq, tempIndex, sizeLeft - pivot,
                       tempFreq + sizeLeft - pivot, tempIndex + sizeLeft - pivot,
-                      (pivot >> 1), nodeFreq, nodeIndex, participants,
+                      (pivot >> 1), nodeFreq, nodeIndex,
                       mergePerThread, partitionIndex, barrier);
 
         sizeLeft = sizeLeft - pivot + (pivot >> 1);
@@ -448,9 +444,8 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         barrier.fence();
     }
     int threadIndex = threadIdx.x;
-    //__shared__ int s_CL[kThreadsPerBlock];
-    if (tid < size) {
-        int4* pointer = reinterpret_cast<int4*>(nodes + tid);
+    for (int i = tid; i < size; i += totalNumThreads) {
+        int4* pointer = reinterpret_cast<int4*>(nodes + i);
         Node cur;
         *reinterpret_cast<int4*>(&cur) = *pointer;
         int parent = cur.parent;
@@ -465,80 +460,11 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
             *reinterpret_cast<int4*>(&cur) = *pointer;
             parent = cur.parent;
         }
-        // s_CL[threadIndex] = length;
-        CL[tid] = length;
+        CL[i] = length;
+	if (i == 0) {
+            *maxCL = length;
+	}
     }
-    if (tid == 0) {
-        *maxCL = CL[tid];
-    }
-#if 0
-    __syncthreads();
-#define MAX(x, y) (x) < (y) ? (y) : (x)
-    int val;
-#pragma unroll
-    for (int reduceBlock = (kThreadsPerBlock >> 1); reduceBlock >= 1;
-         reduceBlock >>= 1) {
-        if (reduceBlock >= 64) {
-            if (threadIndex < reduceBlock) {
-                s_CL[threadIndex] =
-                    MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
-            }
-            __syncthreads();
-        } else if (reduceBlock == 32) {
-            if (threadIndex < reduceBlock) {
-                s_CL[threadIndex] =
-                    MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
-            }
-        } else {
-            if (reduceBlock == 16) {
-                val = s_CL[threadIndex];
-            }
-            int shfl = __shfl_down_sync(0xffffffff, val, reduceBlock);
-            val = MAX(val, shfl);
-        }
-    }
-    if (threadIndex == 0) {
-        reduceCL[bid] = val;
-    }
-    barrier.fence();
-    // final round reduce
-    if (bid == 0) {
-        for (int i = threadIndex; i < gridDim.x; i += kThreadsPerBlock) {
-            if (i == threadIndex) {
-                s_CL[threadIndex] = reduceCL[i];
-            } else {
-                s_CL[threadIndex] = MAX(s_CL[threadIndex], reduceCL[i]);
-            }
-        }
-        __syncthreads();
-        int val;
-#pragma unroll
-        for (int reduceBlock = (kThreadsPerBlock >> 1); reduceBlock >= 1;
-             reduceBlock >>= 1) {
-            if (reduceBlock >= 64) {
-                if (threadIndex < reduceBlock) {
-                    s_CL[threadIndex] =
-                        MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
-                }
-                __syncthreads();
-            } else if (reduceBlock == 32) {
-                if (threadIndex < reduceBlock) {
-                    s_CL[threadIndex] =
-                        MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
-                }
-            } else {
-                if (reduceBlock == 16) {
-                    val = s_CL[threadIndex];
-                }
-                int shfl = __shfl_down_sync(0xffffffff, val, reduceBlock);
-                val = MAX(val, shfl);
-            }
-        }
-        if (threadIndex == 0) {
-            *maxCL = val;
-        }
-    }
-#endif
 }
 
 __global__ void GenerateCW(Node const* nodes, uint8_t* CW, int size,
@@ -732,24 +658,53 @@ class GpuHuffmanWorkspace {
     GpuMemory<int> _workspace;
 };
 
-std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
+static int minmumPowOfTwo(int n) {
+    n = n - 1;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    return n < 0 ? 1 : n + 1;
+}	
+
+static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
                              GpuHuffmanWorkspace workspace,
                              cudaStream_t stream) {
     timer tm(stream);
     tm.start();
     {
-        static constexpr int kThreadsPerBlock = 512;
-        dim3 blockDim((symbolSize + kThreadsPerBlock - 1) / kThreadsPerBlock);
-        dim3 threadDim(kThreadsPerBlock);
+	cudaDeviceProp prop;
+	cuda_check(cudaGetDeviceProperties(&prop, 0));
+	int smCount = prop.multiProcessorCount;
+	static constexpr int regsPerSM = 65536;
+	static constexpr int regsPerThreadBlock = 64;
+	int maxThreadsPerSM = regsPerSM / regsPerThreadBlock;
+	int threadsPerBlock;
+	int numBlocks;
+	if (maxThreadsPerSM * smCount < symbolSize) {
+	    threadsPerBlock = prop.maxThreadsPerBlock;
+	    numBlocks = smCount;
+	} else {
+//	    cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<F>	
+	    threadsPerBlock = maxThreadsPerSM * smCount - symbolSize + 1;
+	    threadsPerBlock = std::min(prop.maxThreadsPerBlock, threadsPerBlock);
+	    threadsPerBlock = minmumPowOfTwo(threadsPerBlock);
+	    numBlocks = (symbolSize + threadsPerBlock - 1) / threadsPerBlock;
+	}
+	printf("threadsPerBlock: %d\n", threadsPerBlock);
+	printf("numBlocks: %d\n", numBlocks);
+        dim3 blockDim(numBlocks);
+        dim3 threadDim(threadsPerBlock);
         cuda_check(cudaMemsetAsync(workspace.count(), 0, 2 * sizeof(int)));
-        GenerateCL<unsigned int, kThreadsPerBlock>
+	GenerateCL<unsigned int>
             <<<blockDim, threadDim, 0, stream>>>(
                 workspace.CL(), frequencies, symbolSize, workspace.nodeFreq(),
                 workspace.tempFreq(), workspace.nodeIndex(),
                 workspace.tempIndex(), workspace.nodes(), workspace.count(),
                 workspace.sense(), workspace.partitionIndex(),
                 workspace.reduceCL(), workspace.maxCL());
-        cuda_check(cudaGetLastError());
+	cuda_check(cudaGetLastError());
     }
     int maxCL;
     cuda_check(cudaMemcpyAsync(&maxCL, workspace.maxCL(), sizeof(int),
