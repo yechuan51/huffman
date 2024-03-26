@@ -3,23 +3,24 @@ CC=nvcc
 all : archive extract gpu_archive
 
 archive : Compressor.cu
-	${CC} -o archive Compressor.cu
+	${CC} -O3 -o archive Compressor.cu
 
 gpu_archive : gpuCompressor.cu
-	${CC} -std=c++11 -o $@ $< -arch sm_80 --ptxas-options=-v -I.
+	${CC} -O3 -std=c++11 -o $@ $< -arch sm_80 --ptxas-options=-v -I.
 
 extract : Decompressor.cu
-	${CC} -o extract Decompressor.cu
+	${CC} -O3 -o extract Decompressor.cu
 
 clean :
 	@rm -f archive
 	@rm -f extract
+	@rm -f gpu_archive
 
 test :
 	@echo "Build archive and extract"
 	@make all
 	@echo "Testing archive"
-	@./archive README.md
+	@./gpu_archive README.md
 	@echo "Testing extract"
 	@./extract README.md.compressed
 	@echo "Comparing files"

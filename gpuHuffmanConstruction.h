@@ -738,7 +738,7 @@ std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int 
     timer tm(stream);
     tm.start();
     {
-        static constexpr int kThreadsPerBlock = 1024;
+        static constexpr int kThreadsPerBlock = 512;
         dim3 blockDim((symbolSize + kThreadsPerBlock - 1) / kThreadsPerBlock);
         dim3 threadDim(kThreadsPerBlock);
         cuda_check(cudaMemsetAsync(workspace.count(), 0, 2 * sizeof(int)));
