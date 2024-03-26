@@ -187,7 +187,7 @@ int main(int argc, char *argv[]) {
         transformationStrings[character] = CW;
         unsigned char transformationLength = CW.length();
         unsigned short currentCharacter = character;
-
+	printf("%s\n", CW.c_str());
         // Write the current character and its transformation string length
         // to the compressed file.
         writeFromUShort(currentCharacter, bufferByte, bitCounter,
