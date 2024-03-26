@@ -12,13 +12,6 @@
 
 using namespace std;
 
-void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
-void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
-long int sizeOfTheFile(char *);
-void writeFileSize(long int, unsigned char &, int, FILE *);
-void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
-void writeIfFullBuffer(unsigned char &, int &, FILE *);
-
 struct TreeNode
 { // this structure will be used to create the translation tree
     TreeNode *left, *right;
@@ -26,6 +19,16 @@ struct TreeNode
     unsigned short character;
     string bit;
 };
+
+void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
+void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
+long int sizeOfTheFile(char *);
+void writeFileSize(long int, unsigned char &, int, FILE *);
+void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
+void writeIfFullBuffer(unsigned char &, int &, FILE *);
+void cpuGenHuffmanTree(TreeNode *, int, long int *);
+void cpuEncode(FILE* , FILE* , long int , TreeNode* , int);
+
 
 bool TreeNodeCompare(TreeNode a, TreeNode b)
 {
@@ -88,89 +91,8 @@ int main(int argc, char *argv[])
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
     // Each leaf node represents a unique byte and its frequency in the input data.
     TreeNode *nodesForHuffmanTree = new TreeNode[uniqueSymbolCount * 2 - 1];
-    TreeNode *currentNode = nodesForHuffmanTree;
 
-    // Step 2: Fill the array with data for each unique byte.
-    for (long int *frequency = freqCount; frequency < freqCount + 65536; frequency++)
-    {
-        if (*frequency)
-        {
-            currentNode->right = NULL;
-            currentNode->left = NULL;
-            currentNode->occurrences = *frequency;
-            currentNode->character = frequency - freqCount;
-            currentNode++;
-        }
-    }
-
-    // Step 3: Sort the leaf nodes based on frequency to prepare for tree construction.
-    // In ascending order.
-    sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount, TreeNodeCompare);
-
-    // Step 4: Construct the Huffman tree by merging nodes with the lowest frequencies.
-    TreeNode *smallestNode = nodesForHuffmanTree;
-    TreeNode *secondSmallestNode = nodesForHuffmanTree + 1;
-    TreeNode *newInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
-    TreeNode *nextInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
-    TreeNode *nextLeafNode = nodesForHuffmanTree + 2;
-    for (int i = 0; i < uniqueSymbolCount - 1; i++)
-    {
-        // Create a new internal node that combines the two smallest nodes.
-        newInternalNode->occurrences = smallestNode->occurrences + secondSmallestNode->occurrences;
-        newInternalNode->left = smallestNode;
-        newInternalNode->right = secondSmallestNode;
-        // Assign bits for tree navigation: '1' for the path to smallestNode,
-        // '0' for secondSmallestNode.
-        smallestNode->bit = "1";
-        secondSmallestNode->bit = "0";
-        newInternalNode++;
-
-        // Update smallestNode and secondSmallestNode for the next iteration.
-        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount)
-        {
-            // All leaf nodes have been processed; proceed with internal nodes.
-            smallestNode = nextInternalNode;
-            nextInternalNode++;
-        }
-        else
-        {
-            // Choose the next smallest node from the leaf or internal nodes.
-            smallestNode = (nextLeafNode->occurrences < nextInternalNode->occurrences) ? nextLeafNode++ : nextInternalNode++;
-        }
-
-        // Repeat the process for secondSmallestNode.
-        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount)
-        {
-            secondSmallestNode = nextInternalNode;
-            nextInternalNode++;
-        }
-        else if (nextInternalNode >= newInternalNode)
-        {
-            secondSmallestNode = nextLeafNode;
-            nextLeafNode++;
-        }
-        else
-        {
-            secondSmallestNode = (nextLeafNode->occurrences < nextInternalNode->occurrences) ? nextLeafNode++ : nextInternalNode++;
-        }
-    }
-
-    // Step 5: Assign Huffman codes to each node.
-    // Iterate from the last internal node to the root, building the Huffman codes in reverse.
-    for (TreeNode *node = nodesForHuffmanTree + uniqueSymbolCount * 2 - 2; node > nodesForHuffmanTree - 1; node--)
-    {
-        // If a left child exists, concatenate the current node's code to it. This assigns the '0' path.
-        if (node->left)
-        {
-            node->left->bit = node->bit + node->left->bit;
-        }
-
-        // Similar operation for the right child, representing the '1' path.
-        if (node->right)
-        {
-            node->right->bit = node->bit + node->right->bit;
-        }
-    }
+    cpuGenHuffmanTree(nodesForHuffmanTree, uniqueSymbolCount, freqCount);
 
     string scompressed = argv[1];
     scompressed += ".compressed";
@@ -326,3 +248,88 @@ void writeIfFullBuffer(unsigned char &bufferByte, int &bitCounter, FILE *filePtr
         bitCounter = 0;
     }
 }
+
+
+void cpuGenHuffmanTree(TreeNode *nodesForHuffmanTree, int uniqueSymbolCount, long int *freqCount) {
+
+    TreeNode *currentNode = nodesForHuffmanTree;
+    for (long int *frequency = freqCount; frequency < freqCount + 65536; frequency++)
+    {
+        if (*frequency)
+        {
+            currentNode->right = NULL;
+            currentNode->left = NULL;
+            currentNode->occurrences = *frequency;
+            currentNode->character = frequency - freqCount;
+            currentNode++;
+        }
+    }
+
+    // Step 3: Sort the leaf nodes based on frequency to prepare for tree construction.
+    // In ascending order.
+    sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount, TreeNodeCompare);
+
+    // Step 4: Construct the Huffman tree by merging nodes with the lowest frequencies.
+    TreeNode *smallestNode = nodesForHuffmanTree;
+    TreeNode *secondSmallestNode = nodesForHuffmanTree + 1;
+    TreeNode *newInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
+    TreeNode *nextInternalNode = nodesForHuffmanTree + uniqueSymbolCount;
+    TreeNode *nextLeafNode = nodesForHuffmanTree + 2;
+    for (int i = 0; i < uniqueSymbolCount - 1; i++)
+    {
+        // Create a new internal node that combines the two smallest nodes.
+        newInternalNode->occurrences = smallestNode->occurrences + secondSmallestNode->occurrences;
+        newInternalNode->left = smallestNode;
+        newInternalNode->right = secondSmallestNode;
+        // Assign bits for tree navigation: '1' for the path to smallestNode,
+        // '0' for secondSmallestNode.
+        smallestNode->bit = "1";
+        secondSmallestNode->bit = "0";
+        newInternalNode++;
+
+        // Update smallestNode and secondSmallestNode for the next iteration.
+        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount)
+        {
+            // All leaf nodes have been processed; proceed with internal nodes.
+            smallestNode = nextInternalNode;
+            nextInternalNode++;
+        }
+        else
+        {
+            // Choose the next smallest node from the leaf or internal nodes.
+            smallestNode = (nextLeafNode->occurrences < nextInternalNode->occurrences) ? nextLeafNode++ : nextInternalNode++;
+        }
+
+        // Repeat the process for secondSmallestNode.
+        if (nextLeafNode >= nodesForHuffmanTree + uniqueSymbolCount)
+        {
+            secondSmallestNode = nextInternalNode;
+            nextInternalNode++;
+        }
+        else if (nextInternalNode >= newInternalNode)
+        {
+            secondSmallestNode = nextLeafNode;
+            nextLeafNode++;
+        }
+        else
+        {
+            secondSmallestNode = (nextLeafNode->occurrences < nextInternalNode->occurrences) ? nextLeafNode++ : nextInternalNode++;
+        }
+    }
+
+    // Step 5: Assign Huffman codes to each node.
+    // Iterate from the last internal node to the root, building the Huffman codes in reverse.
+    for (TreeNode *node = nodesForHuffmanTree + uniqueSymbolCount * 2 - 2; node > nodesForHuffmanTree - 1; node--)
+    {
+        // If a left child exists, concatenate the current node's code to it. This assigns the '0' path.
+        if (node->left)
+        {
+            node->left->bit = node->bit + node->left->bit;
+        }
+
+        // Similar operation for the right child, representing the '1' path.
+        if (node->right)
+        {
+            node->right->bit = node->bit + node->right->bit;
+        }
+    }}
