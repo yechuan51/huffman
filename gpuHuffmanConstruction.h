@@ -693,7 +693,7 @@ static std::tuple<int, int> queryOptimalThreadsPerBlock(int symbolSize) {
     cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<unsigned int>, s));
     cuda_check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocksPerSM, GenerateCL<unsigned int>, threadsPerBlock, 0)); 
     int maxNumBlocks = blocksPerSM * smCount;
-    if (maxNumBlocks < numBlocks) {
+    if (maxNumBlocks > numBlocks) {
         return {numBlocks, threadsPerBlock}; 
     } else {
         return {maxNumBlocks, threadsPerBlock};
