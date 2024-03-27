@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <iomanip>
 #include <vector>
+#include <sys/time.h>
 
 using namespace std;
 
@@ -30,6 +31,12 @@ struct TreeNode
 bool TreeNodeCompare(TreeNode a, TreeNode b)
 {
     return a.occurrences < b.occurrences;
+}
+
+double getTimeStamp() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_usec / 1000000 + tv.tv_sec;
 }
 
 int main(int argc, char *argv[])
@@ -107,6 +114,7 @@ int main(int argc, char *argv[])
     // In ascending order.
     sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount, TreeNodeCompare);
 
+    double start = getTimeStamp();
     // Step 4: Construct the Huffman tree by merging nodes with the lowest frequencies.
     TreeNode *smallestNode = nodesForHuffmanTree;
     TreeNode *secondSmallestNode = nodesForHuffmanTree + 1;
@@ -171,6 +179,9 @@ int main(int argc, char *argv[])
             node->right->bit = node->bit + node->right->bit;
         }
     }
+    double elapsedTime = getTimeStamp() - start;
+    printf("construction time: %.3f ms, symbols/s: %.3f\n", elapsedTime * 1000.0,
+           (float)(uniqueSymbolCount) / (elapsedTime * 1e-3));
 
     string scompressed = argv[1];
     scompressed += ".compressed";

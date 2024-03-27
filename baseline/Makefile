@@ -1,10 +1,10 @@
 all : archive extract
 
 archive : Compressor.cu
-	nvcc -o archive Compressor.cu
+	nvcc -O3 -o archive Compressor.cu
 
 extract : Decompressor.cu
-	nvcc -o extract Decompressor.cu
+	nvcc -O3 -o extract Decompressor.cu
 
 clean :
 	@rm -f archive
