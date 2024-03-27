@@ -16,13 +16,13 @@ test :
 	@echo "Build archive and extract"
 	@make all
 	@echo "Testing archive"
-	@./archive README.md
+	@./archive romeo.txt
 	@echo "Testing extract"
-	@./extract README.md.compressed
+	@./extract romeo.txt.compressed
 	@echo "Comparing files"
-	@diff README.md DECOMPRESSED_FILE
+	@diff romeo.txt DECOMPRESSED_FILE
 	@echo "Delete compressed file"
-	@rm README.md.compressed
+	@rm romeo.txt.compressed
 	@rm DECOMPRESSED_FILE*
 
 .PHONY : all clean
