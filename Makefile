@@ -15,6 +15,7 @@ clean :
 test :
 	@echo "Build archive and extract"
 	@make all
+	@rm -rf DECOMPRESSED_FILE*
 	@echo "Testing archive"
 	@./archive romeo.txt
 	@echo "Testing extract"

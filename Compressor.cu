@@ -200,23 +200,22 @@ int main(int argc, char *argv[])
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
-    for (unsigned int *frequency = freqCount.data();
-         frequency < freqCount.data() + kMaxSymbolSize; frequency++)
+    for (size_t i = 0; i < sortedFreqCount.size(); ++i)
     {
-        if (*frequency)
+        if (sortedFreqCount[i] != 0)
         {
-            currentNode->right = NULL;
-            currentNode->left = NULL;
-            currentNode->occurrences = *frequency;
-            currentNode->character = frequency - freqCount.data();
+            currentNode->right = nullptr;
+            currentNode->left = nullptr;
+            currentNode->occurrences = sortedFreqCount[i];
+            currentNode->character = static_cast<unsigned short>(sortedIndices[i]);
             currentNode++;
         }
     }
 
     // Step 3: Sort the leaf nodes based on frequency to prepare for tree
     // construction. In ascending order.
-    sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount,
-         TreeNodeCompare);
+    // sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount,
+    //      TreeNodeCompare);
 
     string scompressed = argv[1];
     scompressed += ".compressed";
