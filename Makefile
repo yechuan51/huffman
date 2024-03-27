@@ -11,6 +11,7 @@ extract : Decompressor.cu
 clean :
 	@rm -f archive
 	@rm -f extract
+	@rm -f DECOMPRESSED_FILE*
 
 test :
 	@echo "Build archive and extract"
