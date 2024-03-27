@@ -114,10 +114,6 @@ int main(int argc, char *argv[])
         lastByte = fileData[originalFileSize - 1];
     }
 
-    // Start timer.
-    struct timeval start, end;
-    gettimeofday(&start, NULL);
-
     unsigned char *d_fileData;
     unsigned int *d_freqCount;
     cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
@@ -156,6 +152,8 @@ int main(int argc, char *argv[])
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
     // Free unused memory.
+    nonZeroCount.clear();
+    cudaFree(d_nonZeroCount);
     cudaFreeHost(fileData);
 
     thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
@@ -164,19 +162,11 @@ int main(int argc, char *argv[])
     thrust::sequence(thrust::device, indicesVec.begin(), indicesVec.end());
     thrust::sort_by_key(d_freqCountVec.begin(), d_freqCountVec.end(), indicesVec.begin());
 
-    std::vector<unsigned int> sortedFreqCount(kMaxSymbolSize);
     std::vector<unsigned int> sortedIndices(kMaxSymbolSize);
-    thrust::copy(d_freqCountVec.begin(), d_freqCountVec.end(), sortedFreqCount.begin());
+    thrust::copy(d_freqCountVec.begin(), d_freqCountVec.end(), freqCount.begin());
     thrust::copy(indicesVec.begin(), indicesVec.end(), sortedIndices.begin());
 
-    // End timer
-    gettimeofday(&end, NULL);
-    double elapsedTime = (end.tv_sec - start.tv_sec) * 1000.0;
-    elapsedTime += (end.tv_usec - start.tv_usec) / 1000.0;
-    std::cout << "Time taken to calculate frequency: " << elapsedTime << " ms"
-              << endl;
-
-    cudaMemcpy(d_freqCount, sortedFreqCount.data(),
+    cudaMemcpy(d_freqCount, freqCount.data(),
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
     int threadsPerBlock;
@@ -200,22 +190,17 @@ int main(int argc, char *argv[])
     TreeNode *currentNode = nodesForHuffmanTree;
 
     // Step 2: Fill the array with data for each unique byte.
-    for (size_t i = 0; i < sortedFreqCount.size(); ++i)
+    for (size_t i = 0; i < freqCount.size(); ++i)
     {
-        if (sortedFreqCount[i] != 0)
+        if (freqCount[i] != 0)
         {
             currentNode->right = nullptr;
             currentNode->left = nullptr;
-            currentNode->occurrences = sortedFreqCount[i];
+            currentNode->occurrences = freqCount[i];
             currentNode->character = static_cast<unsigned short>(sortedIndices[i]);
             currentNode++;
         }
     }
-
-    // Step 3: Sort the leaf nodes based on frequency to prepare for tree
-    // construction. In ascending order.
-    // sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount,
-    //      TreeNodeCompare);
 
     string scompressed = argv[1];
     scompressed += ".compressed";
