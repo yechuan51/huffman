@@ -666,51 +666,58 @@ static int minmumPowOfTwo(int n) {
     n |= n >> 16;
     return n < 0 ? 1 : n + 1;
 }	
-//
-//static int queryOptimalThreadsPerBlock(int symbolSize) {
-//    cudaDeviceProp prop;
-//    cuda_check(cudaGetDeviceProperties(&prop, 0));
-//    int smCount = prop.multiProcessorCount;
-//    static constexpr int regsPerSM = 65536;
-//    static constexpr int regsPerThreadBlock = 64;
-//    int maxThreadsPerSM = regsPerSM / regsPerThreadBlock;
-//    int threadsPerBlock;
-//    int numBlocks;
-//    if (maxThreadsPerSM * smCount < symbolSize) {
-//        threadsPerBlock = prop.maxThreadsPerBlock;
-//        numBlocks = smCount;
-//    } else {
-//        cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<F>	
-//        threadsPerBlock = maxThreadsPerSM * smCount - symbolSize + 1;
-//        threadsPerBlock = std::min(prop.maxThreadsPerBlock, threadsPerBlock);
-//        threadsPerBlock = minmumPowOfTwo(threadsPerBlock);
-//        numBlocks = (symbolSize + threadsPerBlock - 1) / threadsPerBlock;
-//    }
-//}
+
+struct SmemGetter {
+    typedef int (*FuncType)(int blockSize, void* userData);
+    FuncType _func;
+    void* _userData;
+
+    SmemGetter(FuncType func = 0, void* userData = 0) : _func(func), _userData(userData) {} 
+};
+
+struct SmemGetterWrapper {
+    SmemGetter getter;
+
+    __device__ __host__ int operator()(int blockSize) const {
+#if __CUDA_ARCH__
+  	 int* ptr = 0;
+	 *ptr = 23;
+#else
+	 if (getter._func) {
+             return getter._func(blockSize, getter._userData);
+	 }
+#endif
+	 return 0;
+    }
+};
+
+static std::tuple<int, int> queryOptimalThreadsPerBlock(int symbolSize) {
+    cudaDeviceProp prop;
+    cuda_check(cudaGetDeviceProperties(&prop, 0));
+    int smCount = prop.multiProcessorCount;
+    SmemGetterWrapper s;
+    s.getter = SmemGetter();
+    int threadsPerBlock;
+    int numBlocks;
+    int blocksPerSM;
+    cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<unsigned int>, s));
+    cuda_check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocksPerSM, GenerateCL<unsigned int>, threadsPerBlock, 0)); 
+    int maxNumBlocks = blocksPerSM * smCount;
+    if (maxNumBlocks < numBlocks) {
+        return {numBlocks, threadsPerBlock}; 
+    } else {
+        return {maxNumBlocks, threadsPerBlock};
+    }  
+}
 
 static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
 							GpuHuffmanWorkspace workspace, cudaStream_t stream) {
     timer tm(stream);
     tm.start();
     {
-	cudaDeviceProp prop;
-	cuda_check(cudaGetDeviceProperties(&prop, 0));
-	int smCount = prop.multiProcessorCount;
-	static constexpr int regsPerSM = 65536;
-	static constexpr int regsPerThreadBlock = 64;
-	int maxThreadsPerSM = regsPerSM / regsPerThreadBlock;
 	int threadsPerBlock;
 	int numBlocks;
-	if (maxThreadsPerSM * smCount < symbolSize) {
-	    threadsPerBlock = prop.maxThreadsPerBlock;
-	    numBlocks = smCount;
-	} else {
-//	    cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<F>	
-	    threadsPerBlock = maxThreadsPerSM * smCount - symbolSize + 1;
-	    threadsPerBlock = std::min(prop.maxThreadsPerBlock, threadsPerBlock);
-	    threadsPerBlock = minmumPowOfTwo(threadsPerBlock);
-	    numBlocks = (symbolSize + threadsPerBlock - 1) / threadsPerBlock;
-	}
+	std::tie(numBlocks, threadsPerBlock) = queryOptimalThreadsPerBlock(symbolSize);
 	printf("threadsPerBlock: %d\n", threadsPerBlock);
 	printf("numBlocks: %d\n", numBlocks);
         dim3 blockDim(numBlocks);

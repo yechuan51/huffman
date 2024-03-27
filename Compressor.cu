@@ -140,10 +140,11 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(d_freqCount, freqCount.data(),
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
-    static constexpr int kThreadsPerBlock = 1024;
-
+    int threadsPerBlock;
+    std::tie(numBlocks, threadsPerBlock) = queryOptimalThreadsPerBlock(uniqueSymbolCount);
+	
     // Step 1: Initialize workspace
-    GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);
+    GpuHuffmanWorkspace workspace(uniqueSymbolCount, threadsPerBlock);
 
     // Step 2: Gpu Code Word construction
     auto codewords = gpuCodebookConstruction(
