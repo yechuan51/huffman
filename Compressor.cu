@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+#include <thrust/sort.h>
+#include <thrust/execution_policy.h>
+#include <thrust/device_vector.h>
+
 #include "gpuHuffmanConstruction.h"
 
 using namespace std;
@@ -154,12 +158,39 @@ int main(int argc, char *argv[])
     // Free unused memory.
     cudaFreeHost(fileData);
 
+    thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
+    thrust::device_vector<unsigned int> indicesVec(kMaxSymbolSize);
+
+    thrust::sequence(thrust::device, indicesVec.begin(), indicesVec.end());
+    thrust::sort_by_key(d_freqCountVec.begin(), d_freqCountVec.end(), indicesVec.begin());
+
+    std::vector<unsigned int> sortedFreqCount(kMaxSymbolSize);
+    std::vector<unsigned int> sortedIndices(kMaxSymbolSize);
+    thrust::copy(d_freqCountVec.begin(), d_freqCountVec.end(), sortedFreqCount.begin());
+    thrust::copy(indicesVec.begin(), indicesVec.end(), sortedIndices.begin());
+
     // End timer
     gettimeofday(&end, NULL);
     double elapsedTime = (end.tv_sec - start.tv_sec) * 1000.0;
     elapsedTime += (end.tv_usec - start.tv_usec) / 1000.0;
     std::cout << "Time taken to calculate frequency: " << elapsedTime << " ms"
               << endl;
+
+    cudaMemcpy(d_freqCount, sortedFreqCount.data(),
+               kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
+
+    int threadsPerBlock;
+    std::tie(numBlocks, threadsPerBlock) = queryOptimalThreadsPerBlock(uniqueSymbolCount);
+
+    // Step 1: Initialize workspace
+    GpuHuffmanWorkspace workspace(uniqueSymbolCount, threadsPerBlock);
+
+    // Step 2: Gpu Code Word construction
+    auto codewords = gpuCodebookConstruction(
+        d_freqCount + kMaxSymbolSize - uniqueSymbolCount, uniqueSymbolCount,
+        std::move(workspace), 0);
+
+    cuda_check(cudaFree(d_freqCount));
 
     // TODO: Remove this
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
@@ -186,27 +217,6 @@ int main(int argc, char *argv[])
     // construction. In ascending order.
     sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount,
          TreeNodeCompare);
-
-    std::sort(
-        freqCount.begin(), freqCount.end(),
-        [](unsigned int const &a, unsigned int const &b)
-        { return a < b; });
-
-    cudaMemcpy(d_freqCount, freqCount.data(),
-               kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
-
-    int threadsPerBlock;
-    std::tie(numBlocks, threadsPerBlock) = queryOptimalThreadsPerBlock(uniqueSymbolCount);
-
-    // Step 1: Initialize workspace
-    GpuHuffmanWorkspace workspace(uniqueSymbolCount, threadsPerBlock);
-
-    // Step 2: Gpu Code Word construction
-    auto codewords = gpuCodebookConstruction(
-        d_freqCount + kMaxSymbolSize - uniqueSymbolCount, uniqueSymbolCount,
-        std::move(workspace), 0);
-
-    cuda_check(cudaFree(d_freqCount));
 
     string scompressed = argv[1];
     scompressed += ".compressed";
