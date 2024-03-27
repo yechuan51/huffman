@@ -264,7 +264,7 @@ template <typename F>
 __device__ __forceinline__ void ParallelMerge(
     F const* leftFreq, int const* leftIndex, int leftSize, F const* rightFreq,
     int const* rightIndex, int rightSize, F* mergeFreq, int* mergeIndex,
-    int mergePerThread, int2* partitionIndex, Barrier& barrier) {
+    int mergePerThread, Barrier& barrier) {
     int bid = blockIdx.x;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int totalNumThreads = blockDim.x * gridDim.x;
@@ -356,8 +356,7 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
                            int* nodeIndex, int* tempIndex, Node* nodes,
                            /* barrier */
                            int* count, int* sense,
-                           /* parallel merge */ int2* partitionIndex,
-                           /* CL legnth */ int* reduceCL, int* maxCL) {
+                           /* CL legnth */ int* maxCL) {
     int bid = blockIdx.x;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int totalNumThreads = gridDim.x * blockDim.x;
@@ -437,7 +436,7 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         ParallelMerge(tempFreq, tempIndex, sizeLeft - pivot,
                       tempFreq + sizeLeft - pivot, tempIndex + sizeLeft - pivot,
                       (pivot >> 1), nodeFreq, nodeIndex,
-                      mergePerThread, partitionIndex, barrier);
+                      mergePerThread, barrier);
 
         sizeLeft = sizeLeft - pivot + (pivot >> 1);
 
@@ -597,35 +596,30 @@ class GpuHuffmanWorkspace {
             cuda_check(cudaFree(const_cast<void*>(pointer)));
         };
         int workspaceSize = sizeof(Node) * 2 * symbolSize +
-                            sizeof(int2) * symbolSize +
                             sizeof(unsigned int) * symbolSize * 2 +
                             sizeof(int) * symbolSize * 3 +
-                            sizeof(int) * gridDim + sizeof(int) * 3;
+                            sizeof(int) * 3;
         int* workspacePtr;
         cuda_check(cudaMalloc((void**)(&workspacePtr), workspaceSize));
         _workspace = {workspacePtr, CudaFree};
         _nodes = reinterpret_cast<Node*>(_workspace.get());
-        _partitionIndex = reinterpret_cast<int2*>(_nodes + 2 * symbolSize);
         _nodeFreq =
-            reinterpret_cast<unsigned int*>(_partitionIndex + symbolSize);
+            reinterpret_cast<unsigned int*>(_nodes + 2 * symbolSize);
         _tempFreq = _nodeFreq + symbolSize;
         _nodeIndex = reinterpret_cast<int*>(_tempFreq + symbolSize);
         _tempIndex = _nodeIndex + symbolSize;
         _CL = _tempIndex + symbolSize;
-        _reduceCL = _CL + symbolSize;
-        _count = _reduceCL + gridDim;
+        _count = _CL + symbolSize;
         _sense = _count + 1;
         _maxCL = _sense + 1;
     }
 
     Node* nodes() { return _nodes; }
-    int2* partitionIndex() { return _partitionIndex; }
     unsigned int* nodeFreq() { return _nodeFreq; }
     unsigned int* tempFreq() { return _tempFreq; }
     int* nodeIndex() { return _nodeIndex; }
     int* tempIndex() { return _tempIndex; }
     int* CL() { return _CL; }
-    int* reduceCL() { return _reduceCL; }
     int* count() { return _count; }
     int* sense() { return _sense; }
     int* maxCL() { return _maxCL; }
@@ -634,13 +628,11 @@ class GpuHuffmanWorkspace {
     int _symbolSize;
     int _threadsPerBlock;
     Node* _nodes;
-    int2* _partitionIndex;
     unsigned int* _nodeFreq;
     unsigned int* _tempFreq;
     int* _nodeIndex;
     int* _tempIndex;
     int* _CL;
-    int* _reduceCL;
     int* _count;
     int* _sense;
     int* _maxCL;
@@ -719,8 +711,7 @@ static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencie
                 workspace.CL(), frequencies, symbolSize, workspace.nodeFreq(),
                 workspace.tempFreq(), workspace.nodeIndex(),
                 workspace.tempIndex(), workspace.nodes(), workspace.count(),
-                workspace.sense(), workspace.partitionIndex(),
-                workspace.reduceCL(), workspace.maxCL());
+                workspace.sense(), workspace.maxCL());
 	cuda_check(cudaGetLastError());
     }
     int maxCL;
