@@ -494,7 +494,7 @@ __global__ void GenerateCW(Node const* nodes, uint8_t* CW, int size,
     }
 }
 
-void test_serial_merge() {
+static void test_serial_merge() {
     int n = 100;
     int na = 8;
     int nb = 20;
@@ -532,16 +532,6 @@ void test_serial_merge() {
     kth = KthElement(a.data(), a.size(), b.data(), b.size(), 12);
     printf("%d %d\n", kth.x, kth.y);
 }
-
-//__global__ void calculateFrequency(const unsigned char* data, long int size,
-//                                   unsigned int* freqCount) {
-//    int index = blockIdx.x * blockDim.x + threadIdx.x;
-//    int stride = blockDim.x * gridDim.x;
-//    for (int i = index; i < size / 2; i += stride) {
-//        unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
-//        atomicAdd(&freqCount[readBuf], 1);
-//    }
-//}
 
 template <typename T>
 using GpuMemory = std::unique_ptr<T, std::function<void(void const*)>>;
@@ -666,51 +656,59 @@ static int minmumPowOfTwo(int n) {
     n |= n >> 16;
     return n < 0 ? 1 : n + 1;
 }	
-//
-//static int queryOptimalThreadsPerBlock(int symbolSize) {
-//    cudaDeviceProp prop;
-//    cuda_check(cudaGetDeviceProperties(&prop, 0));
-//    int smCount = prop.multiProcessorCount;
-//    static constexpr int regsPerSM = 65536;
-//    static constexpr int regsPerThreadBlock = 64;
-//    int maxThreadsPerSM = regsPerSM / regsPerThreadBlock;
-//    int threadsPerBlock;
-//    int numBlocks;
-//    if (maxThreadsPerSM * smCount < symbolSize) {
-//        threadsPerBlock = prop.maxThreadsPerBlock;
-//        numBlocks = smCount;
-//    } else {
-//        cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<F>	
-//        threadsPerBlock = maxThreadsPerSM * smCount - symbolSize + 1;
-//        threadsPerBlock = std::min(prop.maxThreadsPerBlock, threadsPerBlock);
-//        threadsPerBlock = minmumPowOfTwo(threadsPerBlock);
-//        numBlocks = (symbolSize + threadsPerBlock - 1) / threadsPerBlock;
-//    }
-//}
+
+struct SmemGetter {
+    typedef int (*FuncType)(int blockSize, void* userData);
+    FuncType _func;
+    void* _userData;
+
+    SmemGetter(FuncType func = 0, void* userData = 0) : _func(func), _userData(userData) {} 
+};
+
+struct SmemGetterWrapper {
+    SmemGetter getter;
+
+    __device__ __host__ int operator()(int blockSize) const {
+#if __CUDA_ARCH__
+  	 int* ptr = 0;
+	 *ptr = 23;
+#else
+	 if (getter._func) {
+             return getter._func(blockSize, getter._userData);
+	 }
+#endif
+	 return 0;
+    }
+};
+
+static std::tuple<int, int> queryOptimalThreadsPerBlock(int symbolSize) {
+    cudaDeviceProp prop;
+    cuda_check(cudaGetDeviceProperties(&prop, 0));
+    int smCount = prop.multiProcessorCount;
+    SmemGetterWrapper s;
+    s.getter = SmemGetter();
+    int threadsPerBlock;
+    int numBlocks;
+    int blocksPerSM;
+    cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<unsigned int>, s));
+    cuda_check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocksPerSM, GenerateCL<unsigned int>, threadsPerBlock, 0)); 
+    int maxNumBlocks = blocksPerSM * smCount;
+    if (maxNumBlocks < numBlocks) {
+        return {numBlocks, threadsPerBlock}; 
+    } else {
+        return {maxNumBlocks, threadsPerBlock};
+    }  
+}
 
 static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
 							GpuHuffmanWorkspace workspace, cudaStream_t stream) {
     timer tm(stream);
     tm.start();
     {
-	cudaDeviceProp prop;
-	cuda_check(cudaGetDeviceProperties(&prop, 0));
-	int smCount = prop.multiProcessorCount;
-	static constexpr int regsPerSM = 65536;
-	static constexpr int regsPerThreadBlock = 64;
-	int maxThreadsPerSM = regsPerSM / regsPerThreadBlock;
+
 	int threadsPerBlock;
 	int numBlocks;
-	if (maxThreadsPerSM * smCount < symbolSize) {
-	    threadsPerBlock = prop.maxThreadsPerBlock;
-	    numBlocks = smCount;
-	} else {
-//	    cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<F>	
-	    threadsPerBlock = maxThreadsPerSM * smCount - symbolSize + 1;
-	    threadsPerBlock = std::min(prop.maxThreadsPerBlock, threadsPerBlock);
-	    threadsPerBlock = minmumPowOfTwo(threadsPerBlock);
-	    numBlocks = (symbolSize + threadsPerBlock - 1) / threadsPerBlock;
-	}
+	std::tie(numBlocks, threadsPerBlock) = queryOptimalThreadsPerBlock(symbolSize);
 	printf("threadsPerBlock: %d\n", threadsPerBlock);
 	printf("numBlocks: %d\n", numBlocks);
         dim3 blockDim(numBlocks);
@@ -793,84 +791,3 @@ static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencie
            (float)(symbolSize) / (elapsedTime * 1e-3));
     return codewords.toCpu(workspace.CL());
 }
-
-// int main(int argc, char* argv[]) {
-// if (argc != 2) {
-//     std::cout << "Must provide a single file name." << std::endl;
-//     return 0;
-//     }
-// 
-//     int symbolSize = 65536;
-// 
-//     std::ifstream originalFile(argv[1], std::ios::binary);
-//     if (!originalFile.is_open()) {
-//         std::cout << argv[1] << " file does not exist" << std::endl
-//                   << "Process has been terminated" << std::endl;
-//         return 0;
-//     }
-// 
-//     originalFile.seekg(0, std::ios::end);
-//     long int originalFileSize = originalFile.tellg();
-//     originalFile.seekg(0, std::ios::beg);
-//     std::cout << "The size of the sum of ORIGINAL files is: "
-//               << originalFileSize << " bytes" << std::endl;
-// 
-//     // Histograming the frequency of bytes.
-//     bool isOdd = originalFileSize % 2 == 1;
-//     unsigned char lastByte = 0;
-// 
-//     std::vector<unsigned char> fileData(originalFileSize);
-//     originalFile.read(reinterpret_cast<char*>(&fileData[0]), originalFileSize);
-//     originalFile.close();
-// 
-//     if (isOdd) {
-//         lastByte = fileData[originalFileSize - 1];
-//     }
-// 
-//     unsigned char* d_fileData;
-//     unsigned int* d_freqCount;
-//     cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
-//     cudaMalloc(&d_freqCount, symbolSize * sizeof(unsigned int));
-//     cudaMemset(d_freqCount, 0, symbolSize * sizeof(unsigned int));
-// 
-//     cudaMemcpy(d_fileData, fileData.data(),
-//                originalFileSize * sizeof(unsigned char),
-//                cudaMemcpyHostToDevice);
-// 
-//     int blockSize = 256;
-//     int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
-//     calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
-//                                                  d_freqCount);
-// 
-//     std::vector<unsigned> freqCount(symbolSize);
-//     cudaMemcpy(freqCount.data(), d_freqCount, symbolSize * sizeof(unsigned int),
-//                cudaMemcpyDeviceToHost);
-// 
-//     std::sort(
-//         freqCount.begin(), freqCount.end(),
-//         [](unsigned int const& a, unsigned int const& b) { return a < b; });
-//     int uniqueSymbolCount = 0;
-//     for (auto const& i : freqCount) {
-//         if (i > 0) {
-//             uniqueSymbolCount++;
-//         }
-//     }
-//     cudaMemcpy(d_freqCount, freqCount.data(), symbolSize * sizeof(unsigned int),
-//                cudaMemcpyHostToDevice);
-// 
-//     // test_serial_merge();
-//     static constexpr int kThreadsPerBlock = 256;
-//     GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);
-//     auto codebook =
-//         gpuCodebookConstruction(d_freqCount + symbolSize - uniqueSymbolCount,
-//                                 uniqueSymbolCount, std::move(workspace), 0);
-// 
-//     //    if (verbose) {
-//     //    for (int i = 0; i < codebook.size(); ++i) {
-//     //        printf("%s\n", codebook[i].c_str());
-//     //        }
-//     //    }
-//     cuda_check(cudaFree(d_fileData));
-//     cuda_check(cudaFree(d_freqCount));
-// }
-
