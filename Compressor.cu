@@ -115,6 +115,10 @@ int main(int argc, char *argv[])
 
     // ---------------------- HISTOGRAM ----------------------
 
+    // Start timer
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+
     unsigned char *d_fileData;
     unsigned int *d_freqCount;
     cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
@@ -146,10 +150,8 @@ int main(int argc, char *argv[])
     cudaMemcpy(nonZeroCount.data(), d_nonZeroCount, numBlocksForUniqueSymbols * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
     unsigned int uniqueSymbolCount = 0;
-    for (int i = 0; i < numBlocksForUniqueSymbols; i++)
-    {
-        uniqueSymbolCount += nonZeroCount[i];
-    }
+    thrust::device_ptr<unsigned int> dev_ptr(d_nonZeroCount);
+    uniqueSymbolCount = thrust::reduce(thrust::device, dev_ptr, dev_ptr + numBlocksForUniqueSymbols, 0, thrust::plus<unsigned int>());
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
     // Free unused memory.
@@ -166,6 +168,12 @@ int main(int argc, char *argv[])
     std::vector<unsigned int> sortedIndices(kMaxSymbolSize);
     thrust::copy(d_freqCountVec.begin(), d_freqCountVec.end(), freqCount.begin());
     thrust::copy(indicesVec.begin(), indicesVec.end(), sortedIndices.begin());
+
+    // Stop timer
+    gettimeofday(&end, NULL);
+    double elapsedTime = (end.tv_sec - start.tv_sec) * 1000.0;
+    elapsedTime += (end.tv_usec - start.tv_usec) / 1000.0;
+    std::cout << "Histograming took " << elapsedTime << " ms" << endl;
 
     // --------------------- END OF HISTOGRAM ---------------------
 
