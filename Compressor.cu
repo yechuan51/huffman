@@ -24,36 +24,43 @@ void writeFileContent(FILE *, long int, string *, unsigned char &, int &,
                       FILE *);
 void writeIfFullBuffer(unsigned char &, int &, FILE *);
 
-struct TreeNode {  // this structure will be used to create the translation tree
+struct TreeNode
+{ // this structure will be used to create the translation tree
     TreeNode *left, *right;
     unsigned int occurrences;
     unsigned short character;
     string bit;
 };
 
-bool TreeNodeCompare(TreeNode a, TreeNode b) {
+bool TreeNodeCompare(TreeNode a, TreeNode b)
+{
     return a.occurrences < b.occurrences;
 }
 
 __global__ void calculateFrequency(const unsigned char *data, long int size,
-                                   unsigned int *freqCount) {
+                                   unsigned int *freqCount)
+{
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
-    for (int i = index; i < size / 2; i += stride) {
+    for (int i = index; i < size / 2; i += stride)
+    {
         unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
         atomicAdd(&freqCount[readBuf], 1);
     }
 }
 
-int main(int argc, char *argv[]) {
-    if (argc != 2) {
+int main(int argc, char *argv[])
+{
+    if (argc != 2)
+    {
         std::cout << "Must provide a single file name." << endl;
         return 0;
     }
 
     static constexpr int kMaxSymbolSize = 65536;
     ifstream originalFile(argv[1], ios::binary);
-    if (!originalFile.is_open()) {
+    if (!originalFile.is_open())
+    {
         std::cout << argv[1] << " file does not exist" << endl
                   << "Process has been terminated" << endl;
         return 0;
@@ -69,11 +76,15 @@ int main(int argc, char *argv[]) {
     bool isOdd = originalFileSize % 2 == 1;
     unsigned char lastByte = 0;
 
-    std::vector<unsigned char> fileData(originalFileSize);
-    originalFile.read(reinterpret_cast<char *>(&fileData[0]), originalFileSize);
+    // std::vector<unsigned char> fileData(originalFileSize);
+    unsigned char *fileData = nullptr;
+    cudaHostAlloc((void **)&fileData, originalFileSize * sizeof(unsigned char), cudaHostAllocDefault);
+
+    originalFile.read(reinterpret_cast<char *>(fileData), originalFileSize);
     originalFile.close();
 
-    if (isOdd) {
+    if (isOdd)
+    {
         lastByte = fileData[originalFileSize - 1];
     }
 
@@ -83,7 +94,7 @@ int main(int argc, char *argv[]) {
     cudaMalloc(&d_freqCount, kMaxSymbolSize * sizeof(unsigned int));
     cudaMemset(d_freqCount, 0, kMaxSymbolSize * sizeof(unsigned int));
 
-    cudaMemcpy(d_fileData, fileData.data(),
+    cudaMemcpy(d_fileData, fileData,
                originalFileSize * sizeof(unsigned char),
                cudaMemcpyHostToDevice);
 
@@ -99,15 +110,17 @@ int main(int argc, char *argv[]) {
     cudaFree(d_fileData);
 
     unsigned int uniqueSymbolCount = 0;
-    for (int i = 0; i < 65536; i++) {
-        if (freqCount[i]) {
+    for (int i = 0; i < 65536; i++)
+    {
+        if (freqCount[i])
+        {
             uniqueSymbolCount++;
         }
     }
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
     // Free unused memory.
-    fileData.clear();
+    cudaFreeHost(fileData);
 
     // TODO: Remove this
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
@@ -118,8 +131,10 @@ int main(int argc, char *argv[]) {
 
     // Step 2: Fill the array with data for each unique byte.
     for (unsigned int *frequency = freqCount.data();
-         frequency < freqCount.data() + kMaxSymbolSize; frequency++) {
-        if (*frequency) {
+         frequency < freqCount.data() + kMaxSymbolSize; frequency++)
+    {
+        if (*frequency)
+        {
             currentNode->right = NULL;
             currentNode->left = NULL;
             currentNode->occurrences = *frequency;
@@ -135,14 +150,15 @@ int main(int argc, char *argv[]) {
 
     std::sort(
         freqCount.begin(), freqCount.end(),
-        [](unsigned int const &a, unsigned int const &b) { return a < b; });
+        [](unsigned int const &a, unsigned int const &b)
+        { return a < b; });
 
     cudaMemcpy(d_freqCount, freqCount.data(),
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
     int threadsPerBlock;
     std::tie(numBlocks, threadsPerBlock) = queryOptimalThreadsPerBlock(uniqueSymbolCount);
-	
+
     // Step 1: Initialize workspace
     GpuHuffmanWorkspace workspace(uniqueSymbolCount, threadsPerBlock);
 
@@ -165,7 +181,8 @@ int main(int argc, char *argv[]) {
     // Write last byte information.
 
     fwrite(&isOdd, 1, 1, compressedFilePtr);
-    if (isOdd) {
+    if (isOdd)
+    {
         // Write the last byte.
         fwrite(&lastByte, 1, 1, compressedFilePtr);
     }
@@ -179,7 +196,8 @@ int main(int argc, char *argv[]) {
     // Iterate through each node in the Huffman tree to write transformation
     // codes to the compressed file.
     int nodeIndex = 0;
-    for (auto const &CW : codewords) {
+    for (auto const &CW : codewords)
+    {
         // Store the transformation string for the current character in the
         // array.
         auto node = nodesForHuffmanTree[nodeIndex];
@@ -198,9 +216,11 @@ int main(int argc, char *argv[]) {
         // Write the transformation string bit by bit to the compressed
         // file.
         char const *transformationStringPtr = &CW[0];
-        while (*transformationStringPtr) {
+        while (*transformationStringPtr)
+        {
             bufferByte <<= 1;
-            if (*transformationStringPtr == '1') {
+            if (*transformationStringPtr == '1')
+            {
                 bufferByte |= 1;
             }
             bitCounter++;
@@ -220,7 +240,8 @@ int main(int argc, char *argv[]) {
 
     // Ensuring the last byte is written to the compressed file by aligning
     // the bit counter.
-    if (bitCounter > 0) {
+    if (bitCounter > 0)
+    {
         bufferByte <<= (8 - bitCounter);
         fwrite(&bufferByte, 1, 1, compressedFilePtr);
     }
@@ -240,12 +261,14 @@ int main(int argc, char *argv[]) {
 
     // Warning if the compressed file is unexpectedly larger than the
     // original sum.
-    if (compressedFileSize > originalFileSize) {
+    if (compressedFileSize > originalFileSize)
+    {
         std::cout << "\nWARNING: The compressed file's size is larger than the "
                      "sum of the originals.\n\n";
     }
 
-    std::cout << endl << "Created compressed file: " << scompressed << endl;
+    std::cout << endl
+              << "Created compressed file: " << scompressed << endl;
     std::cout << "Compression is complete" << endl;
 }
 
@@ -253,7 +276,8 @@ int main(int argc, char *argv[]) {
 // It does not write it directly as one byte instead it mixes uChar and current
 // byte, writes 8 bits of it and puts the rest to curent byte for later use
 void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte,
-                    int bitCounter, FILE *filePtr) {
+                    int bitCounter, FILE *filePtr)
+{
     // Going to write at least 1 byte, first shift the bufferByte to the left
     // to make room for the new byte.
     bufferByte <<= 8 - bitCounter;
@@ -263,9 +287,10 @@ void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte,
 }
 
 void writeFromUShort(unsigned short shortToWrite, unsigned char &bufferByte,
-                     int bitCounter, FILE *filePtr) {
-    unsigned char firstByte = (shortToWrite >> 8) & 0xFF;  // High byte
-    unsigned char secondByte = shortToWrite & 0xFF;        // Low byte
+                     int bitCounter, FILE *filePtr)
+{
+    unsigned char firstByte = (shortToWrite >> 8) & 0xFF; // High byte
+    unsigned char secondByte = shortToWrite & 0xFF;       // Low byte
 
     writeFromUChar(firstByte, bufferByte, bitCounter, filePtr);
     writeFromUChar(secondByte, bufferByte, bitCounter, filePtr);
@@ -275,8 +300,10 @@ void writeFromUShort(unsigned short shortToWrite, unsigned char &bufferByte,
 // using 8 bytes It is done like this to make sure that it can work on little,
 // big or middle-endian systems
 void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter,
-                   FILE *filePtr) {
-    for (int i = 0; i < 8; i++) {
+                   FILE *filePtr)
+{
+    for (int i = 0; i < 8; i++)
+    {
         writeFromUChar(fileSize % 256, bufferByte, bitCounter, filePtr);
         fileSize /= 256;
     }
@@ -286,17 +313,21 @@ void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter,
 // compressed file.
 void writeFileContent(FILE *originalFilePtr, long int originalFileSize,
                       string *transformationStrings, unsigned char &bufferByte,
-                      int &bitCounter, FILE *compressedFilePtr) {
+                      int &bitCounter, FILE *compressedFilePtr)
+{
     unsigned short readBuf;
     unsigned char *readBufPtr;
     readBufPtr = (unsigned char *)&readBuf;
-    while (fread(readBufPtr, 2, 1, originalFilePtr)) {
+    while (fread(readBufPtr, 2, 1, originalFilePtr))
+    {
         char *strPointer = &transformationStrings[readBuf][0];
-        while (*strPointer) {
+        while (*strPointer)
+        {
             writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
 
             bufferByte <<= 1;
-            if (*strPointer == '1') {
+            if (*strPointer == '1')
+            {
                 bufferByte |= 1;
             }
             bitCounter++;
@@ -305,14 +336,17 @@ void writeFileContent(FILE *originalFilePtr, long int originalFileSize,
     }
 }
 
-long int sizeOfTheFile(char *path) {
+long int sizeOfTheFile(char *path)
+{
     ifstream file(path, ifstream::ate | ifstream::binary);
     return file.tellg();
 }
 
 void writeIfFullBuffer(unsigned char &bufferByte, int &bitCounter,
-                       FILE *filePtr) {
-    if (bitCounter == 8) {
+                       FILE *filePtr)
+{
+    if (bitCounter == 8)
+    {
         fwrite(&bufferByte, 1, 1, filePtr);
         bitCounter = 0;
     }
