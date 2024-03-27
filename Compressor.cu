@@ -49,6 +49,28 @@ __global__ void calculateFrequency(const unsigned char *data, long int size,
     }
 }
 
+__global__ void countNonZero(const unsigned int *data, int size, unsigned int *nonZeroCount)
+{
+    extern __shared__ unsigned int sdata[];
+    unsigned int tid = threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    sdata[tid] = (i < size && data[i] > 0) ? 1 : 0;
+    __syncthreads();
+
+    // Perform parallel reduction in shared memory
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
+    {
+        if (tid < s)
+        {
+            sdata[tid] += sdata[tid + s];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0)
+        nonZeroCount[blockIdx.x] = sdata[0];
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -88,6 +110,10 @@ int main(int argc, char *argv[])
         lastByte = fileData[originalFileSize - 1];
     }
 
+    // Start timer.
+    struct timeval start, end;
+    gettimeofday(&start, NULL);
+
     unsigned char *d_fileData;
     unsigned int *d_freqCount;
     cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
@@ -109,18 +135,31 @@ int main(int argc, char *argv[])
 
     cudaFree(d_fileData);
 
+    unsigned int *d_nonZeroCount;
+    int numBlocksForUniqueSymbols = (kMaxSymbolSize + blockSize - 1) / blockSize;
+    cudaMalloc(&d_nonZeroCount, numBlocksForUniqueSymbols * sizeof(unsigned int));
+
+    countNonZero<<<numBlocksForUniqueSymbols, blockSize, blockSize * sizeof(unsigned int)>>>(d_freqCount, kMaxSymbolSize, d_nonZeroCount);
+
+    std::vector<unsigned int> nonZeroCount(numBlocksForUniqueSymbols);
+    cudaMemcpy(nonZeroCount.data(), d_nonZeroCount, numBlocksForUniqueSymbols * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+
     unsigned int uniqueSymbolCount = 0;
-    for (int i = 0; i < 65536; i++)
+    for (int i = 0; i < numBlocksForUniqueSymbols; i++)
     {
-        if (freqCount[i])
-        {
-            uniqueSymbolCount++;
-        }
+        uniqueSymbolCount += nonZeroCount[i];
     }
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
     // Free unused memory.
     cudaFreeHost(fileData);
+
+    // End timer
+    gettimeofday(&end, NULL);
+    double elapsedTime = (end.tv_sec - start.tv_sec) * 1000.0;
+    elapsedTime += (end.tv_usec - start.tv_usec) / 1000.0;
+    std::cout << "Time taken to calculate frequency: " << elapsedTime << " ms"
+              << endl;
 
     // TODO: Remove this
     // Step 1: Initialize the leaf nodes for Huffman tree construction.
