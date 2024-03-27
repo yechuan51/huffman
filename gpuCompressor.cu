@@ -14,6 +14,8 @@
 
 #include "gpuHuffmanConstruction.h"
 
+#define BLOCK_SIZE 256
+
 using namespace std;
 
 void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
@@ -43,6 +45,84 @@ __global__ void calculateFrequency(const unsigned char *data, long int size,
         unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
         atomicAdd(&freqCount[readBuf], 1);
     }
+}
+
+__global__ void populateCWLength(const unsigned char *data, long int size, const int* transformationLengths,
+                            unsigned int* CW_length){
+    int index = blockIdx.x * blockDim.x + threadIdx.x; 
+    int stride = blockDim.x * gridDim.x;
+     
+    for (int i = index; i < size / 2; i += stride) {
+        unsigned short symbol = (data[i * 2 + 1] << 8) | data[i * 2];
+        CW_length[i + 1] = transformationLengths[symbol];
+    }
+}
+
+__global__ void findOffset(unsigned int *input, unsigned int *output, int n) {
+    __shared__ unsigned int temp[BLOCK_SIZE * 2];
+    unsigned int t = threadIdx.x;
+    unsigned int start = 2 * blockIdx.x * blockDim.x;
+
+    if (start + t < n)
+        temp[t] = input[start + t];
+    else
+        temp[t] = 0;
+
+    if (start + blockDim.x + t < n)
+        temp[blockDim.x + t] = input[start + blockDim.x + t];
+    else
+        temp[blockDim.x + t] = 0;
+
+    for (unsigned int stride = 1; stride <= blockDim.x; stride *= 2) {
+        __syncthreads();
+        int index = (t + 1) * stride * 2 - 1;
+        if (index < 2 * blockDim.x)
+            temp[index] += temp[index - stride];
+    }
+
+    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+        __syncthreads();
+        int index = (t + 1) * stride * 2 - 1;
+        if (index + stride < 2 * blockDim.x)
+            temp[index + stride] += temp[index];
+    }
+
+    __syncthreads();
+    if (start + t < n)
+        output[start + t] = temp[t];
+    if (start + blockDim.x + t < n)
+        output[start + blockDim.x + t] = temp[blockDim.x + t];
+}
+
+__global__ void encodeFromSW(const unsigned char *data, long int size, const unsigned char** transformationStrings, unsigned int *offset,
+                             uint8_t *output) {
+    //extern __shared__ int sdata[];
+    int tid = threadIdx.x;
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Each thread loads two characters from file (since codeword is upto 16 bits), convert to corresponding CW
+    // Then store it to shared memory
+    // if (index < size / 2) {
+    //     unsigned short symbol = (data[index * 2 + 1] << 8) | data[index * 2];
+    //     unsigned char* cw_string = transformationStrings[symbol]; // say 10110
+    //     int cw_int = 0;
+    //     for(int i = 0; cw_string[i] != '\0'; i++){
+    //         cw_int = (cw_int << 1) | cw_string[i];
+    //     }
+    //     //sdata[tid] = (index < size / 2) ? cw_int : "";
+    // }
+    __syncthreads();
+
+    // Do reduction in shared memory
+    for (int s = 1; s < blockDim.x; s *= 2) {
+        if (tid % (2*s) == 0) {
+            // for(int i = sdata[tid + s]; i > 0; i >> 1){
+            //     //sdata[tid] = (sdata[tid] << 1) | (i | 1);
+            // }
+            //sdata[tid] 
+        }
+    }
+    
 }
 
 int main(int argc, char *argv[]) {
@@ -96,7 +176,8 @@ int main(int argc, char *argv[]) {
     cudaMemcpy(freqCount.data(), d_freqCount,
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
-    cudaFree(d_fileData);
+    // TODO: d_fileData will need to be used again in encoding stage
+    // cudaFree(d_fileData);
 
     unsigned int uniqueSymbolCount = 0;
     for (int i = 0; i < 65536; i++) {
@@ -209,6 +290,78 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    //std::cout << "Starting Encoding Process" << std::endl;
+    
+    // codewords should be used here to write compressed file
+
+    size_t totalChars = 0;
+
+    std::vector<int> h_transformationLengths;
+    unsigned int* h_data_lengths = (unsigned int *) malloc((originalFileSize + 1)/2 * sizeof(int));
+    unsigned int* h_offsets = (unsigned int *) malloc((originalFileSize + 1)/2 * sizeof(int));
+
+    h_transformationLengths.reserve(transformationStrings.size()); // Reserve space to avoid unnecessary reallocations
+    std::transform(transformationStrings.begin(), transformationStrings.end(), std::back_inserter(h_transformationLengths), [](const std::string& str) {
+        return str.length();
+    });
+
+    for(const int len: h_transformationLengths){
+        totalChars += len; 
+    }
+    //std::cout << std::endl;
+    //std::cout << "num chars = " << totalChars << std::endl;
+    int* d_transformationLengths;
+    unsigned int* d_data_lengths;
+    unsigned int* d_offsets;
+    char** d_transformationStrings;
+    uint8_t *d_encode_buffer;
+    //std::cout << "originalFileSize = " << originalFileSize << std::endl;
+    cudaMalloc((void**) &d_transformationLengths, transformationStrings.size() * sizeof(int));
+    cudaMalloc((void**) &d_data_lengths, (originalFileSize + 1)/2 * sizeof(int));
+    cudaMalloc((void**) &d_offsets, (originalFileSize + 1)/2 * sizeof(int));
+    cudaMalloc((void**) &d_transformationStrings, totalChars * sizeof(char));
+
+    cudaMemcpy(d_transformationLengths, h_transformationLengths.data(),
+               transformationStrings.size() * sizeof(int),
+               cudaMemcpyHostToDevice);
+    
+    cudaMemcpy(d_transformationStrings, transformationStrings.data(),
+               totalChars * sizeof(char),
+               cudaMemcpyHostToDevice);
+
+    //std::cout << "Starting Findoffset Kernel" << std::endl;
+    cudaMemset(d_data_lengths, 0, sizeof(int)); // Set the first value to be 0 for offset purposes
+    populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths);
+    cudaDeviceSynchronize();
+    findOffset<<<numBlocks, blockSize>>>(d_data_lengths, d_offsets, (originalFileSize + 1));
+    cudaDeviceSynchronize();
+   
+    //encodeFromSW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationStrings, d_offsets, d_encode_buffer);
+
+
+    //std::cout << "Finished Findoffset Kernel" << std::endl;
+    
+    // TODO: Remove this normally, use for debugging
+	cudaMemcpy( h_data_lengths, d_data_lengths, (originalFileSize + 1)/2 * sizeof(int), cudaMemcpyDeviceToHost );
+	cudaMemcpy( h_offsets, d_offsets, (originalFileSize + 1)/2 * sizeof(int), cudaMemcpyDeviceToHost );
+
+    // for(long int i = 0; i < (originalFileSize + 1)/2; i++){
+    //     std::cout << h_data_lengths[i] << " ";
+    // }
+    // std::cout << std::endl;
+
+    int sum = 0;
+    for(long int i = 0; i < (originalFileSize + 1)/2; i++){
+        std::cout << h_offsets[i] << " ";
+        // if (sum != h_offsets[i]){
+        //     std::cout << "h_offsets[i] does not match sum (h_offsets[i], sum, index): (" << h_offsets[i] << ", " << sum << ", " << i << ")" << std::endl;
+        //     break;
+        // }
+        unsigned short readBuf = (fileData.data()[i * 2 + 1] << 8) | fileData.data()[i * 2];
+        sum += h_transformationLengths[readBuf];
+    }
+    std::cout << std::endl;
+
     FILE *originalFilePtr = fopen(argv[1], "rb");
     // Writing the size of the file, its name, and its content in the
     // compressed format.
@@ -290,6 +443,7 @@ void writeFileContent(FILE *originalFilePtr, long int originalFileSize,
     unsigned short readBuf;
     unsigned char *readBufPtr;
     readBufPtr = (unsigned char *)&readBuf;
+    // While loop reads the original file for current character (readBufPtr)
     while (fread(readBufPtr, 2, 1, originalFilePtr)) {
         char *strPointer = &transformationStrings[readBuf][0];
         while (*strPointer) {
