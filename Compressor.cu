@@ -53,28 +53,6 @@ __global__ void calculateFrequency(const unsigned char *data, long int size,
     }
 }
 
-__global__ void countNonZero(const unsigned int *data, int size, unsigned int *nonZeroCount)
-{
-    extern __shared__ unsigned int sdata[];
-    unsigned int tid = threadIdx.x;
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    sdata[tid] = (i < size && data[i] > 0) ? 1 : 0;
-    __syncthreads();
-
-    // Perform parallel reduction in shared memory
-    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
-    {
-        if (tid < s)
-        {
-            sdata[tid] += sdata[tid + s];
-        }
-        __syncthreads();
-    }
-
-    if (tid == 0)
-        nonZeroCount[blockIdx.x] = sdata[0];
-}
-
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -138,25 +116,17 @@ int main(int argc, char *argv[])
     cudaMemcpy(freqCount.data(), d_freqCount,
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
-    cudaFree(d_fileData);
+    thrust::device_vector<unsigned int> dev_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
+    unsigned int uniqueSymbolCount = thrust::count_if(
+        thrust::device,
+        dev_freqCountVec.begin(),
+        dev_freqCountVec.end(),
+        thrust::placeholders::_1 > 0);
 
-    unsigned int *d_nonZeroCount;
-    int numBlocksForUniqueSymbols = (kMaxSymbolSize + blockSize - 1) / blockSize;
-    cudaMalloc(&d_nonZeroCount, numBlocksForUniqueSymbols * sizeof(unsigned int));
-
-    countNonZero<<<numBlocksForUniqueSymbols, blockSize, blockSize * sizeof(unsigned int)>>>(d_freqCount, kMaxSymbolSize, d_nonZeroCount);
-
-    std::vector<unsigned int> nonZeroCount(numBlocksForUniqueSymbols);
-    cudaMemcpy(nonZeroCount.data(), d_nonZeroCount, numBlocksForUniqueSymbols * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-
-    unsigned int uniqueSymbolCount = 0;
-    thrust::device_ptr<unsigned int> dev_ptr(d_nonZeroCount);
-    uniqueSymbolCount = thrust::reduce(thrust::device, dev_ptr, dev_ptr + numBlocksForUniqueSymbols, 0, thrust::plus<unsigned int>());
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
     // Free unused memory.
-    nonZeroCount.clear();
-    cudaFree(d_nonZeroCount);
+    cudaFree(d_fileData);
     cudaFreeHost(fileData);
 
     thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
