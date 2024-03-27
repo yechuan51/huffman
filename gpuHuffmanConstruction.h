@@ -84,7 +84,7 @@ struct Barrier {
           _wait_thread{threadIdx.x == 0} {}
 
     __device__ __forceinline__ void wait() {
-        int state;
+        int state = 0;
         fetch(_count, state);
         while (__syncthreads_and(state != _n - 1)) {
             fetch(_count, state);
@@ -694,7 +694,7 @@ static std::tuple<int, int> queryOptimalThreadsPerBlock(int symbolSize) {
     cuda_check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocksPerSM, GenerateCL<unsigned int>, threadsPerBlock, 0)); 
     int maxNumBlocks = blocksPerSM * smCount;
     if (maxNumBlocks > numBlocks) {
-        return {numBlocks, threadsPerBlock}; 
+        return {numBlocks, threadsPerBlock};
     } else {
         return {maxNumBlocks, threadsPerBlock};
     }  
