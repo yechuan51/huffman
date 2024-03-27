@@ -102,7 +102,6 @@ int main(int argc, char *argv[])
     bool isOdd = originalFileSize % 2 == 1;
     unsigned char lastByte = 0;
 
-    // std::vector<unsigned char> fileData(originalFileSize);
     unsigned char *fileData = nullptr;
     cudaHostAlloc((void **)&fileData, originalFileSize * sizeof(unsigned char), cudaHostAllocDefault);
 
@@ -113,6 +112,8 @@ int main(int argc, char *argv[])
     {
         lastByte = fileData[originalFileSize - 1];
     }
+
+    // ---------------------- HISTOGRAM ----------------------
 
     unsigned char *d_fileData;
     unsigned int *d_freqCount;
@@ -165,6 +166,8 @@ int main(int argc, char *argv[])
     std::vector<unsigned int> sortedIndices(kMaxSymbolSize);
     thrust::copy(d_freqCountVec.begin(), d_freqCountVec.end(), freqCount.begin());
     thrust::copy(indicesVec.begin(), indicesVec.end(), sortedIndices.begin());
+
+    // --------------------- END OF HISTOGRAM ---------------------
 
     cudaMemcpy(d_freqCount, freqCount.data(),
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyHostToDevice);
