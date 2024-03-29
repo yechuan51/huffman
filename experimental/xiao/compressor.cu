@@ -14,7 +14,6 @@
 #include <random>
 #include <string>
 #include <vector>
-#include <functional>
 
 static const bool pagelocked_mem = true;
 static const bool verbose = true;
@@ -84,7 +83,7 @@ struct Barrier {
           _wait_thread{threadIdx.x == 0} {}
 
     __device__ __forceinline__ void wait() {
-        int state = 0;
+        int state;
         fetch(_count, state);
         while (__syncthreads_and(state != _n - 1)) {
             fetch(_count, state);
@@ -264,10 +263,10 @@ template <typename F>
 __device__ __forceinline__ void ParallelMerge(
     F const* leftFreq, int const* leftIndex, int leftSize, F const* rightFreq,
     int const* rightIndex, int rightSize, F* mergeFreq, int* mergeIndex,
-    int mergePerThread, Barrier& barrier) {
+    int participants, int mergePerThread, int2* partitionIndex,
+    Barrier& barrier) {
     int bid = blockIdx.x;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    int totalNumThreads = blockDim.x * gridDim.x;
 
 #if SERIAL_MERGE
     if (tid == 0) {
@@ -308,11 +307,14 @@ __device__ __forceinline__ void ParallelMerge(
     //    }
 
     //    barrier.fence();
-    for (int i = tid * mergePerThread; i < leftSize + rightSize; i += totalNumThreads * mergePerThread) {
+    if (tid < participants) {
+        int i = tid * mergePerThread;
+
         // int2 start = partitionIndex[tid];
         // int2 end = partitionIndex[tid + 1];
 
-        int2 start = KthElement(leftFreq, leftSize, rightFreq, rightSize, i);
+        int2 start = KthElement(leftFreq, leftSize, rightFreq, rightSize,
+                                tid * mergePerThread);
 
 #if MERGE_PER_THREADS_1
         if (start.x == -1) {
@@ -323,7 +325,8 @@ __device__ __forceinline__ void ParallelMerge(
             mergeIndex[i] = leftIndex[start.x];
         }
 #else
-        int2 end = KthElement(leftFreq, leftSize, rightFreq, rightSize, i + mergePerThread);
+        int2 end = KthElement(leftFreq, leftSize, rightFreq, rightSize,
+                              tid * mergePerThread + mergePerThread);
 
         for (; i < (tid + 1) * mergePerThread; ++i) {
             if (start.x >= end.x) {
@@ -350,28 +353,28 @@ __device__ __forceinline__ void ParallelMerge(
     //    barrier.fence();
 }
 
-template <typename F>
+template <typename F, int kThreadsPerBlock>
 __global__ void GenerateCL(int* CL, F const* histogram, int size,
                            /* global variables */ F* nodeFreq, F* tempFreq,
                            int* nodeIndex, int* tempIndex, Node* nodes,
                            /* barrier */
                            int* count, int* sense,
-                           /* CL legnth */ int* maxCL) {
+                           /* parallel merge */ int2* partitionIndex,
+                           /* CL legnth */ int* reduceCL, int* maxCL) {
     int bid = blockIdx.x;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
-    int totalNumThreads = gridDim.x * blockDim.x;
     Barrier barrier{count, gridDim.x, sense};
 
-    for (int i = tid; i < size; i += totalNumThreads) {
+    if (tid < size) {
         Node nd;
-        nd.index = i;
+        nd.index = tid;
         nd.left = -1;
         nd.right = -1;
         nd.parent = -1;
-        int4* pointer = reinterpret_cast<int4*>(nodes + i);
+        int4* pointer = reinterpret_cast<int4*>(nodes + tid);
         *pointer = *reinterpret_cast<int4*>(&nd);
-        nodeFreq[i] = histogram[i];
-        nodeIndex[i] = i;
+        nodeFreq[tid] = histogram[tid];
+        nodeIndex[tid] = tid;
     }
     int numCurrentNodes = size;
     barrier.fence();
@@ -387,19 +390,19 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         pivot = pivot - (pivot & 0x1);
         //  if (tid == 0) printf("%d\n", pivot);
 
-	for (int i = tid; i < sizeLeft - pivot; i += totalNumThreads) {
-            tempFreq[i] = nodeFreq[i + pivot];
-            tempIndex[i] = nodeIndex[i + pivot];
+        if (tid < sizeLeft - pivot) {
+            tempFreq[tid] = nodeFreq[tid + pivot];
+            tempIndex[tid] = nodeIndex[tid + pivot];
         }
 
-	for (int i = tid; i < (pivot >> 1); i += totalNumThreads) {
-            int left = nodeIndex[i * 2];
-            int right = nodeIndex[i * 2 + 1];
+        if (tid < (pivot >> 1)) {
+            int left = nodeIndex[tid * 2];
+            int right = nodeIndex[tid * 2 + 1];
             {
                 Node node;
                 *reinterpret_cast<int4*>(&node) =
                     *reinterpret_cast<int4*>(&nodes[left]);
-                node.parent = numCurrentNodes + i;
+                node.parent = numCurrentNodes + tid;
                 *reinterpret_cast<int4*>(nodes + left) =
                     reinterpret_cast<int4&>(node);
             }
@@ -407,7 +410,7 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
                 Node node;
                 *reinterpret_cast<int4*>(&node) =
                     *reinterpret_cast<int4*>(&nodes[right]);
-                node.parent = numCurrentNodes + i;
+                node.parent = numCurrentNodes + tid;
                 *reinterpret_cast<int4*>(nodes + right) =
                     reinterpret_cast<int4&>(node);
             }
@@ -418,11 +421,11 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
             nd.right = right;
             nd.parent = -1;
             int4* pointer =
-                reinterpret_cast<int4*>(nodes + numCurrentNodes + i);
+                reinterpret_cast<int4*>(nodes + numCurrentNodes + tid);
             *pointer = reinterpret_cast<int4&>(nd);
-            tempFreq[sizeLeft - pivot + i] =
-                nodeFreq[i * 2] + nodeFreq[i * 2 + 1];
-            tempIndex[sizeLeft - pivot + i] = numCurrentNodes + i;
+            tempFreq[sizeLeft - pivot + tid] =
+                nodeFreq[tid * 2] + nodeFreq[tid * 2 + 1];
+            tempIndex[sizeLeft - pivot + tid] = numCurrentNodes + tid;
         }
         numCurrentNodes += (pivot >> 1);
 
@@ -433,17 +436,20 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
         int mergePerThread = 4;
 #endif
         int mergeSize = sizeLeft - pivot + (pivot >> 1);
+        int participants = (mergeSize + mergePerThread - 1) / mergePerThread;
         ParallelMerge(tempFreq, tempIndex, sizeLeft - pivot,
                       tempFreq + sizeLeft - pivot, tempIndex + sizeLeft - pivot,
-                      (pivot >> 1), nodeFreq, nodeIndex,
-                      mergePerThread, barrier);
+                      (pivot >> 1), nodeFreq, nodeIndex, participants,
+                      mergePerThread, partitionIndex, barrier);
 
         sizeLeft = sizeLeft - pivot + (pivot >> 1);
 
         barrier.fence();
     }
-    for (int i = tid; i < size; i += totalNumThreads) {
-        int4* pointer = reinterpret_cast<int4*>(nodes + i);
+    int threadIndex = threadIdx.x;
+    //__shared__ int s_CL[kThreadsPerBlock];
+    if (tid < size) {
+        int4* pointer = reinterpret_cast<int4*>(nodes + tid);
         Node cur;
         *reinterpret_cast<int4*>(&cur) = *pointer;
         int parent = cur.parent;
@@ -458,11 +464,80 @@ __global__ void GenerateCL(int* CL, F const* histogram, int size,
             *reinterpret_cast<int4*>(&cur) = *pointer;
             parent = cur.parent;
         }
-        CL[i] = length;
-	if (i == 0) {
-            *maxCL = length;
-	}
+        // s_CL[threadIndex] = length;
+        CL[tid] = length;
     }
+    if (tid == 0) {
+        *maxCL = CL[tid];
+    }
+#if 0
+    __syncthreads();
+#define MAX(x, y) (x) < (y) ? (y) : (x)
+    int val;
+#pragma unroll
+    for (int reduceBlock = (kThreadsPerBlock >> 1); reduceBlock >= 1;
+         reduceBlock >>= 1) {
+        if (reduceBlock >= 64) {
+            if (threadIndex < reduceBlock) {
+                s_CL[threadIndex] =
+                    MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
+            }
+            __syncthreads();
+        } else if (reduceBlock == 32) {
+            if (threadIndex < reduceBlock) {
+                s_CL[threadIndex] =
+                    MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
+            }
+        } else {
+            if (reduceBlock == 16) {
+                val = s_CL[threadIndex];
+            }
+            int shfl = __shfl_down_sync(0xffffffff, val, reduceBlock);
+            val = MAX(val, shfl);
+        }
+    }
+    if (threadIndex == 0) {
+        reduceCL[bid] = val;
+    }
+    barrier.fence();
+    // final round reduce
+    if (bid == 0) {
+        for (int i = threadIndex; i < gridDim.x; i += kThreadsPerBlock) {
+            if (i == threadIndex) {
+                s_CL[threadIndex] = reduceCL[i];
+            } else {
+                s_CL[threadIndex] = MAX(s_CL[threadIndex], reduceCL[i]);
+            }
+        }
+        __syncthreads();
+        int val;
+#pragma unroll
+        for (int reduceBlock = (kThreadsPerBlock >> 1); reduceBlock >= 1;
+             reduceBlock >>= 1) {
+            if (reduceBlock >= 64) {
+                if (threadIndex < reduceBlock) {
+                    s_CL[threadIndex] =
+                        MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
+                }
+                __syncthreads();
+            } else if (reduceBlock == 32) {
+                if (threadIndex < reduceBlock) {
+                    s_CL[threadIndex] =
+                        MAX(s_CL[threadIndex], s_CL[threadIndex + reduceBlock]);
+                }
+            } else {
+                if (reduceBlock == 16) {
+                    val = s_CL[threadIndex];
+                }
+                int shfl = __shfl_down_sync(0xffffffff, val, reduceBlock);
+                val = MAX(val, shfl);
+            }
+        }
+        if (threadIndex == 0) {
+            *maxCL = val;
+        }
+    }
+#endif
 }
 
 __global__ void GenerateCW(Node const* nodes, uint8_t* CW, int size,
@@ -493,7 +568,7 @@ __global__ void GenerateCW(Node const* nodes, uint8_t* CW, int size,
     }
 }
 
-static void test_serial_merge() {
+void test_serial_merge() {
     int n = 100;
     int na = 8;
     int nb = 20;
@@ -530,6 +605,16 @@ static void test_serial_merge() {
 
     kth = KthElement(a.data(), a.size(), b.data(), b.size(), 12);
     printf("%d %d\n", kth.x, kth.y);
+}
+
+__global__ void calculateFrequency(const unsigned char* data, long int size,
+                                   unsigned int* freqCount) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i < size / 2; i += stride) {
+        unsigned short readBuf = (data[i * 2 + 1] << 8) | data[i * 2];
+        atomicAdd(&freqCount[readBuf], 1);
+    }
 }
 
 template <typename T>
@@ -596,30 +681,35 @@ class GpuHuffmanWorkspace {
             cuda_check(cudaFree(const_cast<void*>(pointer)));
         };
         int workspaceSize = sizeof(Node) * 2 * symbolSize +
+                            sizeof(int2) * symbolSize +
                             sizeof(unsigned int) * symbolSize * 2 +
                             sizeof(int) * symbolSize * 3 +
-                            sizeof(int) * 3;
+                            sizeof(int) * gridDim + sizeof(int) * 3;
         int* workspacePtr;
         cuda_check(cudaMalloc((void**)(&workspacePtr), workspaceSize));
         _workspace = {workspacePtr, CudaFree};
         _nodes = reinterpret_cast<Node*>(_workspace.get());
+        _partitionIndex = reinterpret_cast<int2*>(_nodes + 2 * symbolSize);
         _nodeFreq =
-            reinterpret_cast<unsigned int*>(_nodes + 2 * symbolSize);
+            reinterpret_cast<unsigned int*>(_partitionIndex + symbolSize);
         _tempFreq = _nodeFreq + symbolSize;
         _nodeIndex = reinterpret_cast<int*>(_tempFreq + symbolSize);
         _tempIndex = _nodeIndex + symbolSize;
         _CL = _tempIndex + symbolSize;
-        _count = _CL + symbolSize;
+        _reduceCL = _CL + symbolSize;
+        _count = _reduceCL + gridDim;
         _sense = _count + 1;
         _maxCL = _sense + 1;
     }
 
     Node* nodes() { return _nodes; }
+    int2* partitionIndex() { return _partitionIndex; }
     unsigned int* nodeFreq() { return _nodeFreq; }
     unsigned int* tempFreq() { return _tempFreq; }
     int* nodeIndex() { return _nodeIndex; }
     int* tempIndex() { return _tempIndex; }
     int* CL() { return _CL; }
+    int* reduceCL() { return _reduceCL; }
     int* count() { return _count; }
     int* sense() { return _sense; }
     int* maxCL() { return _maxCL; }
@@ -628,91 +718,37 @@ class GpuHuffmanWorkspace {
     int _symbolSize;
     int _threadsPerBlock;
     Node* _nodes;
+    int2* _partitionIndex;
     unsigned int* _nodeFreq;
     unsigned int* _tempFreq;
     int* _nodeIndex;
     int* _tempIndex;
     int* _CL;
+    int* _reduceCL;
     int* _count;
     int* _sense;
     int* _maxCL;
     GpuMemory<int> _workspace;
 };
 
-static int minmumPowOfTwo(int n) {
-    n = n - 1;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    return n < 0 ? 1 : n + 1;
-}	
-
-struct SmemGetter {
-    typedef int (*FuncType)(int blockSize, void* userData);
-    FuncType _func;
-    void* _userData;
-
-    SmemGetter(FuncType func = 0, void* userData = 0) : _func(func), _userData(userData) {} 
-};
-
-struct SmemGetterWrapper {
-    SmemGetter getter;
-
-    __device__ __host__ int operator()(int blockSize) const {
-#if __CUDA_ARCH__
-  	 int* ptr = 0;
-	 *ptr = 23;
-#else
-	 if (getter._func) {
-             return getter._func(blockSize, getter._userData);
-	 }
-#endif
-	 return 0;
-    }
-};
-
-static std::tuple<int, int> queryOptimalThreadsPerBlock(int symbolSize) {
-    cudaDeviceProp prop;
-    cuda_check(cudaGetDeviceProperties(&prop, 0));
-    int smCount = prop.multiProcessorCount;
-    SmemGetterWrapper s;
-    s.getter = SmemGetter();
-    int threadsPerBlock;
-    int numBlocks;
-    int blocksPerSM;
-    cuda_check(cudaOccupancyMaxPotentialBlockSizeVariableSMem(&numBlocks, &threadsPerBlock, GenerateCL<unsigned int>, s));
-    cuda_check(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocksPerSM, GenerateCL<unsigned int>, threadsPerBlock, 0)); 
-    int maxNumBlocks = blocksPerSM * smCount;
-    if (maxNumBlocks > numBlocks) {
-        return {numBlocks, threadsPerBlock};
-    } else {
-        return {maxNumBlocks, threadsPerBlock};
-    }  
-}
-
-static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
-							GpuHuffmanWorkspace workspace, cudaStream_t stream) {
+auto gpuCodebookConstruction(unsigned int* frequencies, int symbolSize,
+                             GpuHuffmanWorkspace workspace,
+                             cudaStream_t stream) {
     timer tm(stream);
     tm.start();
     {
-
-	int threadsPerBlock;
-	int numBlocks;
-	std::tie(numBlocks, threadsPerBlock) = queryOptimalThreadsPerBlock(symbolSize);
-	printf("threadsPerBlock: %d\n", threadsPerBlock);
-	printf("numBlocks: %d\n", numBlocks);
-        dim3 blockDim(numBlocks);
-        dim3 threadDim(threadsPerBlock);
+        static constexpr int kThreadsPerBlock = 256;
+        dim3 blockDim((symbolSize + kThreadsPerBlock - 1) / kThreadsPerBlock);
+        dim3 threadDim(kThreadsPerBlock);
         cuda_check(cudaMemsetAsync(workspace.count(), 0, 2 * sizeof(int)));
-	GenerateCL<unsigned int>
+        GenerateCL<unsigned int, kThreadsPerBlock>
             <<<blockDim, threadDim, 0, stream>>>(
                 workspace.CL(), frequencies, symbolSize, workspace.nodeFreq(),
                 workspace.tempFreq(), workspace.nodeIndex(),
                 workspace.tempIndex(), workspace.nodes(), workspace.count(),
-                workspace.sense(), workspace.maxCL());
-	cuda_check(cudaGetLastError());
+                workspace.sense(), workspace.partitionIndex(),
+                workspace.reduceCL(), workspace.maxCL());
+        cuda_check(cudaGetLastError());
     }
     int maxCL;
     cuda_check(cudaMemcpyAsync(&maxCL, workspace.maxCL(), sizeof(int),
@@ -782,3 +818,84 @@ static std::vector<std::string> gpuCodebookConstruction(unsigned int* frequencie
            (float)(symbolSize) / (elapsedTime * 1e-3));
     return codewords.toCpu(workspace.CL());
 }
+
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        std::cout << "Must provide a single file name." << std::endl;
+        return 0;
+    }
+
+    int symbolSize = 65536;
+
+    std::ifstream originalFile(argv[1], std::ios::binary);
+    if (!originalFile.is_open()) {
+        std::cout << argv[1] << " file does not exist" << std::endl
+                  << "Process has been terminated" << std::endl;
+        return 0;
+    }
+
+    originalFile.seekg(0, std::ios::end);
+    long int originalFileSize = originalFile.tellg();
+    originalFile.seekg(0, std::ios::beg);
+    std::cout << "The size of the sum of ORIGINAL files is: "
+              << originalFileSize << " bytes" << std::endl;
+
+    // Histograming the frequency of bytes.
+    bool isOdd = originalFileSize % 2 == 1;
+    unsigned char lastByte = 0;
+
+    std::vector<unsigned char> fileData(originalFileSize);
+    originalFile.read(reinterpret_cast<char*>(&fileData[0]), originalFileSize);
+    originalFile.close();
+
+    if (isOdd) {
+        lastByte = fileData[originalFileSize - 1];
+    }
+
+    unsigned char* d_fileData;
+    unsigned int* d_freqCount;
+    cudaMalloc(&d_fileData, originalFileSize * sizeof(unsigned char));
+    cudaMalloc(&d_freqCount, symbolSize * sizeof(unsigned int));
+    cudaMemset(d_freqCount, 0, symbolSize * sizeof(unsigned int));
+
+    cudaMemcpy(d_fileData, fileData.data(),
+               originalFileSize * sizeof(unsigned char),
+               cudaMemcpyHostToDevice);
+
+    int blockSize = 256;
+    int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
+    calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
+                                                 d_freqCount);
+
+    std::vector<unsigned> freqCount(symbolSize);
+    cudaMemcpy(freqCount.data(), d_freqCount, symbolSize * sizeof(unsigned int),
+               cudaMemcpyDeviceToHost);
+
+    std::sort(
+        freqCount.begin(), freqCount.end(),
+        [](unsigned int const& a, unsigned int const& b) { return a < b; });
+    int uniqueSymbolCount = 0;
+    for (auto const& i : freqCount) {
+        if (i > 0) {
+            uniqueSymbolCount++;
+        }
+    }
+    cudaMemcpy(d_freqCount, freqCount.data(), symbolSize * sizeof(unsigned int),
+               cudaMemcpyHostToDevice);
+
+    // test_serial_merge();
+    static constexpr int kThreadsPerBlock = 256;
+    GpuHuffmanWorkspace workspace(uniqueSymbolCount, kThreadsPerBlock);
+    auto codebook =
+        gpuCodebookConstruction(d_freqCount + symbolSize - uniqueSymbolCount,
+                                uniqueSymbolCount, std::move(workspace), 0);
+
+    //    if (verbose) {
+    //    for (int i = 0; i < codebook.size(); ++i) {
+    //        printf("%s\n", codebook[i].c_str());
+    //        }
+    //    }
+    cuda_check(cudaFree(d_fileData));
+    cuda_check(cudaFree(d_freqCount));
+}
+

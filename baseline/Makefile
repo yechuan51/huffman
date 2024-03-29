@@ -1,30 +1,26 @@
-CC=nvcc
-
 all : archive extract
 
 archive : Compressor.cu
-	${CC} -O3 -std=c++11 -o $@ $< -arch sm_80 --ptxas-options=-v -I.
+	nvcc -O3 -o archive Compressor.cu
 
 extract : Decompressor.cu
-	${CC} -O3 -o extract Decompressor.cu
+	nvcc -O3 -o extract Decompressor.cu
 
 clean :
 	@rm -f archive
 	@rm -f extract
-	@rm -f DECOMPRESSED_FILE*
 
 test :
 	@echo "Build archive and extract"
 	@make all
-	@rm -rf DECOMPRESSED_FILE*
 	@echo "Testing archive"
-	@./archive romeo.txt
+	@./archive README.md
 	@echo "Testing extract"
-	@./extract romeo.txt.compressed
+	@./extract README.md.compressed
 	@echo "Comparing files"
-	@diff romeo.txt DECOMPRESSED_FILE
+	@diff README.md DECOMPRESSED_FILE
 	@echo "Delete compressed file"
-	@rm romeo.txt.compressed
+	@rm README.md.compressed
 	@rm DECOMPRESSED_FILE*
 
 .PHONY : all clean
