@@ -9,8 +9,15 @@
 #include <cstdio>
 #include <iomanip>
 #include <vector>
+#include <sys/time.h>
 
 using namespace std;
+
+double getTimeStamp() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_usec / 1000000 + tv.tv_sec;
+}
 
 struct TreeNode
 { // this structure will be used to create the translation tree
@@ -20,14 +27,85 @@ struct TreeNode
     string bit;
 };
 
-void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
-void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
+struct bufferedOutStream{
+    unsigned char bufferByte = 0;
+    int bitCounter = 0;
+
+    std::vector<unsigned char> content;
+
+
+    void pushUChar(unsigned char byteToPush){
+        bufferByte <<= 8 - bitCounter;
+        bufferByte |= (byteToPush >> bitCounter);
+        content.push_back(bufferByte);
+        bufferByte = byteToPush;
+    }
+
+    template<typename T>
+    void pushNByte(const T* dataPointer, int n){
+        // Push n bytes of any data as char to contents
+        // TODO: Not safe.
+        const unsigned char* bytePointer = reinterpret_cast<const unsigned char*>(dataPointer);
+        for (int i = 0; i < n; i++) {
+            pushUChar(bytePointer[i]);
+        }
+    }
+
+    void pushUShort(unsigned short shortToPush){
+        unsigned char firstByte = (shortToPush >> 8) & 0xFF; // High byte
+        unsigned char secondByte = shortToPush & 0xFF;       // Low byte
+        pushUChar(firstByte);
+        pushUChar(secondByte);
+    }
+
+    void pushFileSize(long int fileSize)
+    {
+        std::cout << "Pushing Filesize to Outstream. fileSize: " << fileSize <<std::endl;
+
+        for (int i = 0; i < 8; i++)
+        {
+            pushUChar(fileSize % 256);
+            fileSize /= 256;
+        }
+    }   
+
+    void pushIfFullBuffer(){
+        if (bitCounter == 8)
+        {
+            content.push_back(bufferByte);
+            bitCounter = 0;
+        }
+    }
+
+    void align(){
+        if (bitCounter > 0) {
+            // Align the last byte if it's not full.
+            bufferByte <<= (8 - bitCounter);
+            content.push_back(bufferByte);
+        }
+    }
+    void flushToFile(FILE* filePtr) {
+        align();
+        // Write the accumulated content to the file.
+        if (!content.empty()) {
+            fwrite(&content[0], 1, content.size(), filePtr);
+            std::cout << "Flushing content. Size: " << content.size() << "bytes."<<std::endl;
+        }
+        // fwrite(&content[0], 1, 3533, filePtr);
+        // Reset the buffer and bit counter after flushing.
+        content.clear();
+        bitCounter = 0;
+        bufferByte = 0;
+    }
+};
+// void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
+// void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
 long int sizeOfTheFile(char *);
-void writeFileSize(long int, unsigned char &, int, FILE *);
-void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
-void writeIfFullBuffer(unsigned char &, int &, FILE *);
+// void writeFileSize(long int, unsigned char &, int, FILE *);
+// void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
+// void writeIfFullBuffer(unsigned char &, int &, FILE *);
 void cpuGenHuffmanTree(TreeNode *, int, long int *);
-void cpuEncode(FILE* , FILE* , long int , TreeNode* , int);
+void cpuEncode(bufferedOutStream&, ::vector<unsigned char>, int, string *);
 
 
 bool TreeNodeCompare(TreeNode a, TreeNode b)
@@ -96,23 +174,27 @@ int main(int argc, char *argv[])
 
     string scompressed = argv[1];
     scompressed += ".compressed";
-    FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
+    // FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
 
+    bufferedOutStream outStream;
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
-    fwrite(&uniqueSymbolCount, 2, 1, compressedFilePtr);
-
+    // fwrite(&uniqueSymbolCount, 2, 1, compressedFilePtr);
+    // outStream.pushUShort(static_cast<unsigned short>(uniqueSymbolCount));
+    outStream.pushNByte(&uniqueSymbolCount, 2);
     // Write last byte information.
 
-    fwrite(&isOdd, 1, 1, compressedFilePtr);
+    // fwrite(&isOdd, 1, 1, compressedFilePtr);
+    outStream.pushNByte(&isOdd, 1);
     if (isOdd)
     {
         // Write the last byte.
-        fwrite(&lastByte, 1, 1, compressedFilePtr);
+        // fwrite(&lastByte, 1, 1, compressedFilePtr);
+        outStream.pushUChar(lastByte);
     }
 
-    int bitCounter = 0;
-    unsigned char bufferByte = 0;
+    outStream.bitCounter = 0;
+    outStream.bufferByte = 0;
     // Array to store transformation strings for each unique character to optimize compression.
     string transformationStrings[65536];
 
@@ -125,37 +207,41 @@ int main(int argc, char *argv[])
         unsigned short currentCharacter = node->character;
 
         // Write the current character and its transformation string length to the compressed file.
-        writeFromUShort(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
-        writeFromUChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
+        // writeFromUShort(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
+        // writeFromUChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
+
+        outStream.pushUShort(currentCharacter);
+        // outStream.pushNByte(&currentCharacter, 2);
+        outStream.pushUChar(transformationLength);
 
         // Write the transformation string bit by bit to the compressed file.
         char *transformationStringPtr = &node->bit[0];
         while (*transformationStringPtr)
         {
-            bufferByte <<= 1;
+            outStream.bufferByte <<= 1;
             if (*transformationStringPtr == '1')
             {
-                bufferByte |= 1;
+                outStream.bufferByte |= 1;
             }
-            bitCounter++;
+            outStream.bitCounter++;
             transformationStringPtr++;
-            writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
+            // writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
+            outStream.pushIfFullBuffer();
         }
     }
 
-    FILE *originalFilePtr = fopen(argv[1], "rb");
+    // FILE *originalFilePtr = fopen(argv[1], "rb");
     // Writing the size of the file, its name, and its content in the compressed format.
-    writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
-    writeFileContent(originalFilePtr, originalFileSize, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
-    fclose(originalFilePtr);
+    // writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
+    outStream.pushFileSize(originalFileSize);
+    cpuEncode(outStream, fileData, originalFileSize, transformationStrings);
+    // writeFileContent(originalFilePtr, originalFileSize, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
+    // fclose(originalFilePtr);
 
     // Ensuring the last byte is written to the compressed file by aligning the bit counter.
-    if (bitCounter > 0)
-    {
-        bufferByte <<= (8 - bitCounter);
-        fwrite(&bufferByte, 1, 1, compressedFilePtr);
-    }
-
+    outStream.align();
+    FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
+    outStream.flushToFile(compressedFilePtr);
     fclose(compressedFilePtr);
 
     // Get the size of compressed file.
@@ -180,59 +266,59 @@ int main(int argc, char *argv[])
 // below function is used for writing the uChar to compressed file
 // It does not write it directly as one byte instead it mixes uChar and current byte, writes 8 bits of it
 // and puts the rest to curent byte for later use
-void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
-{
-    // Going to write at least 1 byte, first shift the bufferByte to the left
-    // to make room for the new byte.
-    bufferByte <<= 8 - bitCounter;
-    bufferByte |= (byteToWrite >> bitCounter);
-    fwrite(&bufferByte, 1, 1, filePtr);
-    bufferByte = byteToWrite;
-}
+// void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
+// {
+//     // Going to write at least 1 byte, first shift the bufferByte to the left
+//     // to make room for the new byte.
+//     bufferByte <<= 8 - bitCounter;
+//     bufferByte |= (byteToWrite >> bitCounter);
+//     fwrite(&bufferByte, 1, 1, filePtr);
+//     bufferByte = byteToWrite;
+// }
 
-void writeFromUShort(unsigned short shortToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
-{
-    unsigned char firstByte = (shortToWrite >> 8) & 0xFF; // High byte
-    unsigned char secondByte = shortToWrite & 0xFF;       // Low byte
+// void writeFromUShort(unsigned short shortToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
+// {
+//     unsigned char firstByte = (shortToWrite >> 8) & 0xFF; // High byte
+//     unsigned char secondByte = shortToWrite & 0xFF;       // Low byte
 
-    writeFromUChar(firstByte, bufferByte, bitCounter, filePtr);
-    writeFromUChar(secondByte, bufferByte, bitCounter, filePtr);
-}
+//     writeFromUChar(firstByte, bufferByte, bitCounter, filePtr);
+//     writeFromUChar(secondByte, bufferByte, bitCounter, filePtr);
+// }
 
 // This function is writing byte count of current input file to compressed file using 8 bytes
 // It is done like this to make sure that it can work on little, big or middle-endian systems
-void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
-{
-    for (int i = 0; i < 8; i++)
-    {
-        writeFromUChar(fileSize % 256, bufferByte, bitCounter, filePtr);
-        fileSize /= 256;
-    }
-}
+// void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
+// {
+//     for (int i = 0; i < 8; i++)
+//     {
+//         writeFromUChar(fileSize % 256, bufferByte, bitCounter, filePtr);
+//         fileSize /= 256;
+//     }
+// }
 
 // Below function translates and writes bytes from current input file to the compressed file.
-void writeFileContent(FILE *originalFilePtr, long int originalFileSize, string *transformationStrings, unsigned char &bufferByte, int &bitCounter, FILE *compressedFilePtr)
-{
-    unsigned short readBuf;
-    unsigned char *readBufPtr;
-    readBufPtr = (unsigned char *)&readBuf;
-    while (fread(readBufPtr, 2, 1, originalFilePtr))
-    {
-        char *strPointer = &transformationStrings[readBuf][0];
-        while (*strPointer)
-        {
-            writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
+// void writeFileContent(FILE *originalFilePtr, long int originalFileSize, string *transformationStrings, unsigned char &bufferByte, int &bitCounter, FILE *compressedFilePtr)
+// {
+//     unsigned short readBuf;
+//     unsigned char *readBufPtr;
+//     readBufPtr = (unsigned char *)&readBuf;
+//     while (fread(readBufPtr, 2, 1, originalFilePtr))
+//     {
+//         char *strPointer = &transformationStrings[readBuf][0];
+//         while (*strPointer)
+//         {
+//             writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
 
-            bufferByte <<= 1;
-            if (*strPointer == '1')
-            {
-                bufferByte |= 1;
-            }
-            bitCounter++;
-            strPointer++;
-        }
-    }
-}
+//             bufferByte <<= 1;
+//             if (*strPointer == '1')
+//             {
+//                 bufferByte |= 1;
+//             }
+//             bitCounter++;
+//             strPointer++;
+//         }
+//     }
+// }
 
 long int sizeOfTheFile(char *path)
 {
@@ -333,3 +419,30 @@ void cpuGenHuffmanTree(TreeNode *nodesForHuffmanTree, int uniqueSymbolCount, lon
             node->right->bit = node->bit + node->right->bit;
         }
     }}
+
+void cpuEncode(bufferedOutStream &outStream, ::vector<unsigned char> fileData, int originalFileSize, string *transformationStrings){
+    
+    // translate file content to outstream
+    unsigned short currentWord = 0;
+    char *strPointer;
+    for (int i = 0; i < originalFileSize; i += 2)
+    {   
+        if (i + 1 < originalFileSize) 
+        {
+            currentWord = (fileData[i+1] << 8) | fileData[i];
+        }
+        strPointer = &transformationStrings[currentWord][0];
+        while (*strPointer)
+        {
+            outStream.pushIfFullBuffer();
+
+            outStream.bufferByte <<= 1;
+            if (*strPointer == '1')
+            {
+                outStream.bufferByte |= 1;
+            }
+            outStream.bitCounter++;
+            strPointer++;
+        }
+    }
+}

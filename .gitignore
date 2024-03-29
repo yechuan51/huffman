@@ -2,3 +2,4 @@ archive
 extract
 
 *.compressed
+/data/*

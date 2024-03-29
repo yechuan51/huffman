@@ -69,7 +69,6 @@ int main(int argc, char *argv[])
     fread(&uniqueSymbolCount, 2, 1, compressedFile);
     if (uniqueSymbolCount == 0)
         uniqueSymbolCount = 65536; // Handling the special case where there are 256 unique bytes.
-
     // Read last byte information.
     bool isOdd = false;
     unsigned char lastByte = 0;
@@ -98,7 +97,7 @@ int main(int argc, char *argv[])
     // File count was written to the compressed file from least significiant byte
     // to most significiant byte to make sure system's endianness
     // does not affect the process and that is why we are processing size information like this
-
+    // TODO: Could be removed.
     long int fileSize = readFileSize(bufferByte, bitCounter, compressedFile);
     string newfileName = "DECOMPRESSED_FILE";
     change_name_if_exists(&newfileName[0]);
