@@ -33,6 +33,10 @@ struct bufferedOutStream{
 
     std::vector<unsigned char> content;
 
+    // bufferedOutStream(size_t approxSize) : content(approxSize) {
+    //     content.reserve(approxSize);
+    // }
+    // bufferedOutStream() = default;
 
     void pushUChar(unsigned char byteToPush){
         bufferByte <<= 8 - bitCounter;
@@ -104,9 +108,10 @@ long int sizeOfTheFile(char *);
 // void writeFileSize(long int, unsigned char &, int, FILE *);
 // void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
 // void writeIfFullBuffer(unsigned char &, int &, FILE *);
+
+
 void cpuGenHuffmanTree(TreeNode *, int, long int *);
 void cpuEncode(bufferedOutStream&, ::vector<unsigned char>, int, string *);
-
 
 bool TreeNodeCompare(TreeNode a, TreeNode b)
 {
@@ -170,12 +175,22 @@ int main(int argc, char *argv[])
     // Each leaf node represents a unique byte and its frequency in the input data.
     TreeNode *nodesForHuffmanTree = new TreeNode[uniqueSymbolCount * 2 - 1];
 
+    double genHuffmanTreeBegin = getTimeStamp();
+
     cpuGenHuffmanTree(nodesForHuffmanTree, uniqueSymbolCount, freqCount);
 
+    double genHuffmanTreeEnd = getTimeStamp();
+
+
+    double treeConstructionElapsedTime = getTimeStamp() - genHuffmanTreeBegin;
+    printf("construction time: %.3f ms, symbols/s: %.3f\n", treeConstructionElapsedTime * 1000.0,
+           (float)(uniqueSymbolCount) / (treeConstructionElapsedTime * 1e-3));
     string scompressed = argv[1];
     scompressed += ".compressed";
     // FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
 
+    double cpuEncodeBegin = getTimeStamp();
+    // size_t approxCompressedSize = static_cast<size_t>( originalFileSize * 0.3);
     bufferedOutStream outStream;
     // Writing the first piece of header information: the count of unique bytes.
     // This count is essential for reconstructing the Huffman tree during the decompression process.
@@ -234,6 +249,8 @@ int main(int argc, char *argv[])
     // Writing the size of the file, its name, and its content in the compressed format.
     // writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
     outStream.pushFileSize(originalFileSize);
+
+
     cpuEncode(outStream, fileData, originalFileSize, transformationStrings);
     // writeFileContent(originalFilePtr, originalFileSize, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
     // fclose(originalFilePtr);
@@ -242,7 +259,10 @@ int main(int argc, char *argv[])
     outStream.align();
     FILE *compressedFilePtr = fopen(&scompressed[0], "wb");
     outStream.flushToFile(compressedFilePtr);
-    fclose(compressedFilePtr);
+    fclose(compressedFilePtr); 
+
+    double cpuEncodeEnd = getTimeStamp();
+    printf("Encoding time: %.3f ms\n", (cpuEncodeEnd-cpuEncodeBegin) * 1000.0);
 
     // Get the size of compressed file.
     long int compressedFileSize = sizeOfTheFile(&scompressed[0]);
@@ -419,6 +439,7 @@ void cpuGenHuffmanTree(TreeNode *nodesForHuffmanTree, int uniqueSymbolCount, lon
             node->right->bit = node->bit + node->right->bit;
         }
     }}
+
 
 void cpuEncode(bufferedOutStream &outStream, ::vector<unsigned char> fileData, int originalFileSize, string *transformationStrings){
     
