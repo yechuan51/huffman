@@ -94,6 +94,33 @@ __global__ void findOffset(unsigned int *input, unsigned int *output, int n) {
         output[start + blockDim.x + t] = temp[blockDim.x + t];
 }
 
+//__global__ void addBlockSum(unsigned int *output, unsigned int *lastOutput, int blockSize, int n) {
+__global__ void addBlockSum(unsigned int *output, unsigned int *input, int blockSize, int n) {
+    int blockSum = 0;
+    int blockStart = blockIdx.x * blockSize * 2;
+    if(blockStart < n){
+        for(int i = blockStart - 1; i >= 0; i -= blockSize * 2){
+            blockSum += input[i];
+        }
+        // First half of block
+        int index = blockStart + threadIdx.x;
+        if (index < n) {
+            output[index] = input[index] + blockSum;
+        }
+        // Second half of block
+        index += blockSize;
+        if (index < n) {
+            output[index] = input[index] + blockSum;
+        }
+
+        // if (index == n - 1){
+        //     lastOutput[0] = output[index];
+        // }
+    }
+
+    __syncthreads();
+}
+
 __global__ void encodeFromSW(const unsigned char *data, long int size, const unsigned char** transformationStrings, unsigned int *offset,
                              uint8_t *output) {
     //extern __shared__ int sdata[];
@@ -299,6 +326,8 @@ int main(int argc, char *argv[]) {
     std::vector<int> h_transformationLengths;
     unsigned int* h_data_lengths = (unsigned int *) malloc((originalFileSize + 1)/2 * sizeof(int));
     unsigned int* h_offsets = (unsigned int *) malloc((originalFileSize + 1)/2 * sizeof(int));
+    unsigned int* h_lastOffset = (unsigned int*) malloc(sizeof(int));   // For tracking the size of compiled file
+    uint8_t *h_encode_buffer;
 
     h_transformationLengths.reserve(transformationStrings.size()); // Reserve space to avoid unnecessary reallocations
     std::transform(transformationStrings.begin(), transformationStrings.end(), std::back_inserter(h_transformationLengths), [](const std::string& str) {
@@ -312,14 +341,18 @@ int main(int argc, char *argv[]) {
     //std::cout << "num chars = " << totalChars << std::endl;
     int* d_transformationLengths;
     unsigned int* d_data_lengths;
-    unsigned int* d_offsets;
-    char** d_transformationStrings;
+    unsigned int* d_offsets_t; // Transitional array, which is used to calculate final d_offsets
+    unsigned int* d_offsets; 
+    unsigned int* d_lastOffset; // For tracking the size of compiled file
+    unsigned char** d_transformationStrings;
     uint8_t *d_encode_buffer;
     //std::cout << "originalFileSize = " << originalFileSize << std::endl;
     cudaMalloc((void**) &d_transformationLengths, transformationStrings.size() * sizeof(int));
-    cudaMalloc((void**) &d_data_lengths, (originalFileSize + 1)/2 * sizeof(int));
-    cudaMalloc((void**) &d_offsets, (originalFileSize + 1)/2 * sizeof(int));
-    cudaMalloc((void**) &d_transformationStrings, totalChars * sizeof(char));
+    cudaMalloc((void**) &d_data_lengths, originalFileSize/2 * sizeof(int));
+    cudaMalloc((void**) &d_offsets_t, originalFileSize/2 * sizeof(int));
+    cudaMalloc((void**) &d_offsets, originalFileSize/2 * sizeof(int));
+    cudaMalloc((void**) &d_lastOffset, sizeof(int));
+    cudaMalloc((void**) &d_transformationStrings, totalChars * sizeof(unsigned char));
 
     cudaMemcpy(d_transformationLengths, h_transformationLengths.data(),
                transformationStrings.size() * sizeof(int),
@@ -332,31 +365,47 @@ int main(int argc, char *argv[]) {
     //std::cout << "Starting Findoffset Kernel" << std::endl;
     cudaMemset(d_data_lengths, 0, sizeof(int)); // Set the first value to be 0 for offset purposes
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths);
+    //cudaDeviceSynchronize();
+    findOffset<<<numBlocks, blockSize>>>(d_data_lengths, d_offsets_t, originalFileSize/2);
     cudaDeviceSynchronize();
-    findOffset<<<numBlocks, blockSize>>>(d_data_lengths, d_offsets, (originalFileSize + 1));
+    addBlockSum<<<numBlocks, blockSize>>>(d_offsets, d_offsets_t, blockSize, originalFileSize/2);
+    //addBlockSum<<<numBlocks, blockSize>>>(d_offsets, d_lastOffset, blockSize, (originalFileSize + 1)/2);
     cudaDeviceSynchronize();
    
+    // cudaMemcpy( h_lastOffset, d_lastOffset, sizeof(int), cudaMemcpyDeviceToHost );
+    // // h_lastOffset contains the number of bits that needs to be allocated.
+    // if(h_lastOffset[0] % 8 != 0){
+    //     h_lastOffset[0] += 8 - h_lastOffset[0] % 8;
+    // }
+    // h_lastOffset[0] += 16; // account for the last CW length
+
+    // cudaMalloc((void**) &d_encode_buffer, h_lastOffset[0]);
+    // h_encode_buffer = (uint8_t*) malloc(h_lastOffset[0]);
+
     //encodeFromSW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationStrings, d_offsets, d_encode_buffer);
 
 
     //std::cout << "Finished Findoffset Kernel" << std::endl;
     
     // TODO: Remove this normally, use for debugging
-	cudaMemcpy( h_data_lengths, d_data_lengths, (originalFileSize + 1)/2 * sizeof(int), cudaMemcpyDeviceToHost );
-	cudaMemcpy( h_offsets, d_offsets, (originalFileSize + 1)/2 * sizeof(int), cudaMemcpyDeviceToHost );
+	cudaMemcpy( h_data_lengths, d_data_lengths, originalFileSize/2 * sizeof(int), cudaMemcpyDeviceToHost );
+	cudaMemcpy( h_offsets, d_offsets, originalFileSize/2 * sizeof(int), cudaMemcpyDeviceToHost );
+    //cudaMemcpy( h_encode_buffer, d_encode_buffer, h_lastOffset[0], cudaMemcpyDeviceToHost);
 
-    // for(long int i = 0; i < (originalFileSize + 1)/2; i++){
+    // for(long int i = 0; i < originalFileSize/2; i++){
     //     std::cout << h_data_lengths[i] << " ";
     // }
     // std::cout << std::endl;
 
+
     int sum = 0;
-    for(long int i = 0; i < (originalFileSize + 1)/2; i++){
-        std::cout << h_offsets[i] << " ";
-        // if (sum != h_offsets[i]){
-        //     std::cout << "h_offsets[i] does not match sum (h_offsets[i], sum, index): (" << h_offsets[i] << ", " << sum << ", " << i << ")" << std::endl;
-        //     break;
-        // }
+    for(long int i = 0; i < originalFileSize/2; i++){
+        //std::cout << h_offsets[i] << " ";
+        if (sum != h_offsets[i]){
+            std::cout << std::endl;
+            std::cout << "h_offsets[i] does not match sum (h_offsets[i], sum, index): (" << h_offsets[i] << ", " << sum << ", " << i << ")" << std::endl;
+            break;
+        }
         unsigned short readBuf = (fileData.data()[i * 2 + 1] << 8) | fileData.data()[i * 2];
         sum += h_transformationLengths[readBuf];
     }
