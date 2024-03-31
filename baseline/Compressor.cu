@@ -33,7 +33,8 @@ bool TreeNodeCompare(TreeNode a, TreeNode b)
     return a.occurrences < b.occurrences;
 }
 
-double getTimeStamp() {
+double getTimeStamp()
+{
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return (double)tv.tv_usec / 1000000 + tv.tv_sec;
@@ -82,6 +83,10 @@ int main(int argc, char *argv[])
         lastByte = fileData[originalFileSize - 1];
     }
 
+    // Start timer
+    struct timeval start2, end2;
+    gettimeofday(&start2, NULL);
+
     for (int i = 0; i < 65536; i++)
     {
         if (freqCount[i])
@@ -113,6 +118,11 @@ int main(int argc, char *argv[])
     // Step 3: Sort the leaf nodes based on frequency to prepare for tree construction.
     // In ascending order.
     sort(nodesForHuffmanTree, nodesForHuffmanTree + uniqueSymbolCount, TreeNodeCompare);
+
+    gettimeofday(&end2, NULL);
+    double elapsedTime2 = (end2.tv_sec - start2.tv_sec) * 1000.0;
+    elapsedTime2 += (end2.tv_usec - start2.tv_usec) / 1000.0;
+    std::cout << "Histograming took " << elapsedTime2 << " ms" << endl;
 
     double start = getTimeStamp();
     // Step 4: Construct the Huffman tree by merging nodes with the lowest frequencies.
