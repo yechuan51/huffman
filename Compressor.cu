@@ -116,11 +116,11 @@ int main(int argc, char *argv[])
     cudaMemcpy(freqCount.data(), d_freqCount,
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
-    thrust::device_vector<unsigned int> dev_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
+    thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
     unsigned int uniqueSymbolCount = thrust::count_if(
         thrust::device,
-        dev_freqCountVec.begin(),
-        dev_freqCountVec.end(),
+        d_freqCountVec.begin(),
+        d_freqCountVec.end(),
         thrust::placeholders::_1 > 0);
 
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
@@ -129,9 +129,7 @@ int main(int argc, char *argv[])
     cudaFree(d_fileData);
     cudaFreeHost(fileData);
 
-    thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
     thrust::device_vector<unsigned int> indicesVec(kMaxSymbolSize);
-
     thrust::sequence(thrust::device, indicesVec.begin(), indicesVec.end());
     thrust::sort_by_key(d_freqCountVec.begin(), d_freqCountVec.end(), indicesVec.begin());
 
