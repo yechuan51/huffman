@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <numeric>
+#include <bitset>
 
 static const bool pagelocked_mem = true;
 static const bool verbose = true;
