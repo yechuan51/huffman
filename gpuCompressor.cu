@@ -459,8 +459,6 @@ int main(int argc, char *argv[]) {
     unsigned int* h_last_CW_length = (unsigned int*) malloc(sizeof(int));   // For tracking the last CW length to calculate total size of compressed file
     unsigned int* h_offsets = (unsigned int *) malloc((originalFileSize/2 + 1) * sizeof(int));
     unsigned int* h_lastOffset = (unsigned int*) malloc(sizeof(int));   // For tracking the total offsets to calculate total size of compressed file
-    const char* h_transformationStringPool = std::accumulate(transformationStrings.begin(), transformationStrings.end(), std::string("")).c_str(); // Convert vector of strings to one string to be sent to the kernel
-    //std::cout << "transformation string pool: " << h_transformationStringPool << std::endl;
     uint8_t *h_encode_buffer;
 
     h_transformationLengths.reserve(transformationStrings.size()); // Reserve space to avoid unnecessary reallocations
@@ -494,10 +492,12 @@ int main(int argc, char *argv[]) {
                transformationStrings.size() * sizeof(int),
                cudaMemcpyHostToDevice);
     
+    const char* h_transformationStringPool = std::accumulate(transformationStrings.begin(), transformationStrings.end(), std::string("")).c_str(); // Convert vector of strings to one string to be sent to the kernel
+    // Unknown bug: if h_transformationStringPool is defined at where all the other host variables, it will be empty by the time i t reaches cudaMemcpy
+    std::cout << "h_transformationStringPool: " << h_transformationStringPool << std::endl;
     cudaMemcpy(d_transformationStringsPool, h_transformationStringPool,
                totalChars * sizeof(char),
                cudaMemcpyHostToDevice);
-
 
 
     cudaMemcpy(d_transformationStringOffsets, h_transformationStringOffsets.data(),
