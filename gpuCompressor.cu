@@ -54,7 +54,7 @@ __global__ void populateCWLength(const unsigned char *data, long int size, const
      
     for (int i = index; i < size / 2; i += stride) {
         unsigned short symbol = (data[i * 2 + 1] << 8) | data[i * 2];
-        CWLengths[i + 1] = transformationLengths[symbol]; // i + 1 to let CW_lengths[0] be 0
+        CWLengths[i + 1] = transformationLengths[symbol]; // i + 1 to let CW_lengths[0] be bitCounter
     }
 }
 
@@ -142,93 +142,111 @@ __device__ int binarySearch(const unsigned int* offsets, int numOffsets, int tar
     return leftIndex;
 }
 
-__global__ void encodeFromSW(const unsigned char *data, long int originalFileSize, 
+__global__ void encodeFromSW(const unsigned char *data, long int originalFileSize, unsigned char bufferByte,
                             const unsigned char* transformationStrings, const int* transformationLengths, const int *transformationStringsOffset, 
-                            unsigned int *CW_offsets, unsigned int* CW_lengths, long int compressedFileSize,
+                            const unsigned int *CW_offsets, const unsigned int* CW_lengths, const long int compressedFileSize,
                             uint8_t *outputs) {
     //extern __shared__ int sdata[];
     // int tid = threadIdx.x;
     int index = blockIdx.x * blockDim.x + threadIdx.x; // example index = 88, index * 8 = 704
 
-
     uint8_t out = 0;
     if(index * 8 < compressedFileSize){
         // These two index can be used 
         int offset_index_left = binarySearch(CW_offsets, originalFileSize/2, index*8); // examply CW_offsets[offset_index_start] = 697
+        // If index*8 = 0 and bitCoutner was not 0,then binarySearch will return 0.
         int offset_index_right = offset_index_left + 1; // CW_offsets[offset_index_end] = example 709
 
         //printf("%d, %d, %d, %d, %d\n", index*8, offset_index_left, offset_index_right, CW_offsets[offset_index_left], CW_offsets[offset_index_right]);
-        
-        // the transformation string related to the character to the left of index in offsets array
-        unsigned short symbol_left = (data[offset_index_left * 2 + 1] << 8) | data[offset_index_left * 2];
-        int t_string_left_offset = transformationStringsOffset[symbol_left];
-        int t_string_left_length = transformationLengths[symbol_left];
-        if( offset_index_right < originalFileSize/2 ){
-            // the transformation string related to the character to the right of index in offsets array
-            unsigned short symbol_right = (data[offset_index_right * 2 + 1] << 8) | data[offset_index_right * 2];
-            int t_string_right_offset = transformationStringsOffset[symbol_right];
-            int t_string_right_length = transformationLengths[symbol_right];
-            //char* t_string = transformationStrings[t_string_offset .. t_string_offset+t_string_length ];
+        if(offset_index_left >= 0){
+            // the transformation string related to the character to the left of index in offsets array
+            unsigned short symbol_left = (data[offset_index_left * 2 + 1] << 8) | data[offset_index_left * 2];
+            int t_string_left_offset = transformationStringsOffset[symbol_left];
+            int t_string_left_length = transformationLengths[symbol_left];
+            if( offset_index_right < originalFileSize/2 ){
+                // the transformation string related to the character to the right of index in offsets array
+                unsigned short symbol_right = (data[offset_index_right * 2 + 1] << 8) | data[offset_index_right * 2];
+                int t_string_right_offset = transformationStringsOffset[symbol_right];
+                int t_string_right_length = transformationLengths[symbol_right];
+                //char* t_string = transformationStrings[t_string_offset .. t_string_offset+t_string_length ];
 
-            //printf("%d, %d, %d, %d, %d, %d\n", symbol_left, symbol_right, t_string_left_offset, t_string_left_length, t_string_right_offset, t_string_right_length);
+                //printf("%d, %d, %d, %d, %d, %d\n", symbol_left, symbol_right, t_string_left_offset, t_string_left_length, t_string_right_offset, t_string_right_length);
 
-
-            int n = CW_offsets[offset_index_right] - index*8;
-            int bitToTake = 8;
-            if (n <= 8) {
-                // Take the last n bits of the t_string_left.
-                for(int i = n - 1; i >= 0; i--){
-                    out = out << 1;
-                    if(transformationStrings[t_string_left_offset + t_string_left_length - 1 - i] == '1'){
-                        out = out | 1;
-                        bitToTake -= 1;
-                    } 
-                }
-                while(bitToTake > 0){
-                    int rightSideLen = bitToTake <= CW_lengths[offset_index_right] ? bitToTake: CW_lengths[offset_index_right];
-                    for(int i = 0; i < rightSideLen; i++){
+                int n = CW_offsets[offset_index_right] - index*8;
+                int bitToTake = 8;
+                if (n <= 8) {
+                    // Take the last n bits of the t_string_left.
+                    for(int i = n - 1; i >= 0; i--){
                         out = out << 1;
-                        if(transformationStrings[t_string_right_offset + i] == '1'){
+                        if(transformationStrings[t_string_left_offset + t_string_left_length - 1 - i] == '1'){
                             out = out | 1;
                             bitToTake -= 1;
                         } 
                     }
-                    offset_index_right += 1; //Prepare for next while loop iteration IF needed
-                }            
-            }
-            else {
-                // Take 8 bits from t_string_left, starting from t_string_left_offset + left_shift
-                int left_shift = index - CW_offsets[offset_index_left];
-                for(int i = 0; i < 8; i++){
-                    out = out << 1;
-                    if(transformationStrings[t_string_left_offset + left_shift + i] == '1'){
-                        out = out | 1;
-                        bitToTake -= 1;
-                    } 
+                    while(bitToTake > 0){
+                        int rightSideLen = bitToTake <= CW_lengths[offset_index_right] ? bitToTake: CW_lengths[offset_index_right];
+                        for(int i = 0; i < rightSideLen; i++){
+                            out = out << 1;
+                            if(transformationStrings[t_string_right_offset + i] == '1'){
+                                out = out | 1;
+                                bitToTake -= 1;
+                            } 
+                        }
+                        offset_index_right += 1; //Prepare for next while loop iteration IF needed
+                    }            
                 }
-            }
-        } else {
-            // The last CW
-            int n = CW_offsets[offset_index_left] + CW_lengths[offset_index_left] - index;
-            if (n <= 8) {
-                // Take the last n bits of the t_string_left.
-                for(int i = n - 1; i >= 0; i--){
-                    out = out << 1;
-                    if(transformationStrings[t_string_left_offset + t_string_left_length - 1 - i] == '1'){
-                        out = out | 1;
-                    } 
+                else {
+                    // Take 8 bits from t_string_left, starting from t_string_left_offset + left_shift
+                    int left_shift = index - CW_offsets[offset_index_left];
+                    for(int i = 0; i < 8; i++){
+                        out = out << 1;
+                        if(transformationStrings[t_string_left_offset + left_shift + i] == '1'){
+                            out = out | 1;
+                            bitToTake -= 1;
+                        } 
+                    }
                 }
             } else {
-                // Take 8 bits from t_string_left, starting from t_string_left_offset + left_shift
-                int left_shift = index - CW_offsets[offset_index_left];
-                for(int i = 0; i < 8; i++){
-                    out = out << 1;
-                    if(transformationStrings[t_string_left_offset + left_shift + i] == '1'){
-                        out = out | 1;
-                    } 
+                // The last CW
+                int n = CW_offsets[offset_index_left] + CW_lengths[offset_index_left] - index;
+                if (n <= 8) {
+                    // Take the last n bits of the t_string_left.
+                    for(int i = n - 1; i >= 0; i--){
+                        out = out << 1;
+                        if(transformationStrings[t_string_left_offset + t_string_left_length - 1 - i] == '1'){
+                            out = out | 1;
+                        } 
+                    }
+                } else {
+                    // Take 8 bits from t_string_left, starting from t_string_left_offset + left_shift
+                    int left_shift = index - CW_offsets[offset_index_left];
+                    for(int i = 0; i < 8; i++){
+                        out = out << 1;
+                        if(transformationStrings[t_string_left_offset + left_shift + i] == '1'){
+                            out = out | 1;
+                        } 
+                    }
+                }
+
+            }
+            
+        } else {
+            // Only here if it's the first character (index = 0) and CW_offests[0] > 0
+            unsigned short symbol_right = (data[1] << 8) | data[0];
+            int t_string_right_offset = transformationStringsOffset[symbol_right];
+            int t_string_right_length = transformationLengths[symbol_right];
+
+            out = out | bufferByte;
+            for(int i = 0; i < 8 - CW_offsets[0]; i++){
+                // printf("out : %d\n", out);
+                // printf("transformationStrings[0] : %c\n", transformationStrings[t_string_right_offset + i]);
+                // printf("trans: %s\n", transformationStrings);
+                out = out << 1;
+                if(transformationStrings[t_string_right_offset + i] == '1'){
+                    out = out | 1;
                 }
             }
-
+            printf("when index = 0, t_string_right_offset = %d, t_string_right_length = %d, out = %d\n", t_string_right_offset, t_string_right_length, out);
         }
         // printf("%d\n", out);
         outputs[index] = out;
@@ -441,11 +459,12 @@ int main(int argc, char *argv[]) {
 
     std::vector<int> h_transformationLengths;
     std::vector<int> h_transformationStringOffsets;
-    unsigned int* h_data_lengths = (unsigned int *) malloc((originalFileSize + 1)/2 * sizeof(int));
+    unsigned int* h_data_lengths = (unsigned int *) malloc((originalFileSize/2 + 1) * sizeof(int));
     unsigned int* h_last_CW_length = (unsigned int*) malloc(sizeof(int));   // For tracking the last CW length to calculate total size of compressed file
-    unsigned int* h_offsets = (unsigned int *) malloc((originalFileSize + 1)/2 * sizeof(int));
+    unsigned int* h_offsets = (unsigned int *) malloc((originalFileSize/2 + 1) * sizeof(int));
     unsigned int* h_lastOffset = (unsigned int*) malloc(sizeof(int));   // For tracking the total offsets to calculate total size of compressed file
     const char* h_transformationStringPool = std::accumulate(transformationStrings.begin(), transformationStrings.end(), std::string("")).c_str(); // Convert vector of strings to one string to be sent to the kernel
+    std::cout << "transformation string pool: " << h_transformationStringPool << std::endl;
     uint8_t *h_encode_buffer;
 
     h_transformationLengths.reserve(transformationStrings.size()); // Reserve space to avoid unnecessary reallocations
@@ -479,16 +498,19 @@ int main(int argc, char *argv[]) {
                transformationStrings.size() * sizeof(int),
                cudaMemcpyHostToDevice);
     
-    cudaMemcpy(d_transformationStringsPool, h_transformationStringPool,
+    cuda_check(cudaMemcpy(d_transformationStringsPool, h_transformationStringPool,
                totalChars * sizeof(char),
-               cudaMemcpyHostToDevice);
+               cudaMemcpyHostToDevice));
+    cout << "cudaMemcpy to d_transformationStringsPool succeed" << endl;
 
     cudaMemcpy(d_transformationStringOffsets, h_transformationStringOffsets.data(),
                transformationStrings.size() * sizeof(int),
                cudaMemcpyHostToDevice);
 
     //std::cout << "Starting Findoffset Kernel" << std::endl;
-    cudaMemset(d_data_lengths, 0, sizeof(int)); // Set the first value to be 0 for offset purposes
+    std::cout << "bitCounter before encoding: " << bitCounter << std::endl;
+    //std::cout << "bufferByte before encoding: " << bufferByte << std::endl;
+    cudaMemcpy(&d_data_lengths[0], &bitCounter, sizeof(int), cudaMemcpyHostToDevice); // Set the first value to be the bitCounter for offset purposes
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths);
     //cudaDeviceSynchronize();
     findOffset<<<numBlocks, blockSize>>>(d_data_lengths, (originalFileSize/2 + 1), d_offsets_t);
@@ -513,26 +535,17 @@ int main(int argc, char *argv[]) {
     std::cout << "h_last_CW_length[0] Size: " << h_last_CW_length[0] << std::endl;
     std::cout << "Compressed File Size: " << compressedContentFileSize << std::endl;
 
-
-    encodeFromSW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, 
-                                            d_transformationStringsPool, d_transformationLengths, d_transformationStringOffsets, 
-                                            d_offsets, d_data_lengths, compressedContentFileSize, d_encode_buffer);
-
-
-    //std::cout << "Finished Findoffset Kernel" << std::endl;
-    
     // TODO: Remove this normally, use for debugging
-	cudaMemcpy( h_data_lengths, d_data_lengths, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost );
-	cudaMemcpy( h_offsets, d_offsets, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost );
-    cudaMemcpy( h_encode_buffer, d_encode_buffer, compressedContentFileSize, cudaMemcpyDeviceToHost);
+	cuda_check(cudaMemcpy( h_data_lengths, d_data_lengths, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost ));
+	cuda_check(cudaMemcpy( h_offsets, d_offsets, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost ));
 
     // Tested to be correct
-    // for(long int i = 0; i < (originalFileSize/2 + 1); i++){
-    //     std::cout << h_data_lengths[i] << " ";
-    // }
-    // std::cout << std::endl;
+    for(long int i = 0; i < (originalFileSize/2 + 1); i++){
+        std::cout << h_data_lengths[i] << " ";
+    }
+    std::cout << std::endl;
 
-    int sum = 0;
+    int sum = bitCounter;
     for(long int i = 0; i < (originalFileSize/2 + 1); i++){
         // std::cout << h_offsets[i] << " ";
         if (sum != h_offsets[i]){
@@ -543,16 +556,30 @@ int main(int argc, char *argv[]) {
         unsigned short readBuf = (fileData.data()[i * 2 + 1] << 8) | fileData.data()[i * 2];
         sum += h_transformationLengths[readBuf];
     }
-    std::cout << std::endl;
+    std::cout << "h_offsets[i] are as expected" << std::endl;
+
+
+    encodeFromSW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, bufferByte,
+                                            d_transformationStringsPool, d_transformationLengths, d_transformationStringOffsets, 
+                                            d_offsets, d_data_lengths, compressedContentFileSize, 
+                                            d_encode_buffer);
+    cudaDeviceSynchronize();
+    
+
+    //std::cout << "Finished Findoffset Kernel" << std::endl;
+
+    cuda_check(cudaMemcpy( h_encode_buffer, d_encode_buffer, compressedContentFileSize, cudaMemcpyDeviceToHost));
+
+
 
     std::cout << "Compressed binary: " << std::endl;
-    for(long int i = 0; i < compressedContentFileSize / 8; i++){
-        uint8_t temp = h_encode_buffer[i];
-        std::bitset<8> x(temp);
+    // for(long int i = 0; i < compressedContentFileSize / 8; i++){
+    //     uint8_t temp = h_encode_buffer[i];
+    //     std::bitset<8> x(temp);
 
-        std::cout << x << " ";
-        // std::cout << temp << " ";
-    }
+    //     std::cout << x << " ";
+    //     // std::cout << temp << " ";
+    // }
     std::cout << "end" << std::endl;
 
     FILE *originalFilePtr = fopen(argv[1], "rb");
