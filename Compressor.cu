@@ -18,6 +18,8 @@
 
 #include "gpuHuffmanConstruction.h"
 
+#define BLOCK_SIZE 256
+
 using namespace std;
 
 void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
@@ -25,6 +27,8 @@ void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
 long int sizeOfTheFile(char *);
 void writeFileSize(long int, unsigned char &, int, FILE *);
 void writeFileContent(FILE *, long int, string *, unsigned char &, int &,
+                      FILE *);
+void writeFileContent(uint8_t*, long int, long int, unsigned char &, int&, 
                       FILE *);
 void writeIfFullBuffer(unsigned char &, int &, FILE *);
 
@@ -52,6 +56,253 @@ __global__ void calculateFrequency(const unsigned char *data, long int size,
         atomicAdd(&freqCount[readBuf], 1);
     }
 }
+
+__global__ void populateCWLength(const unsigned char *data, long int size, const int* transformationLengths,
+                            unsigned int* CWLengths){
+    int index = blockIdx.x * blockDim.x + threadIdx.x; 
+    int stride = blockDim.x * gridDim.x;
+     
+    for (int i = index; i < size / 2; i += stride) {
+        unsigned short symbol = (data[i * 2 + 1] << 8) | data[i * 2];
+        CWLengths[i + 1] = transformationLengths[symbol]; // i + 1 to let CW_lengths[0] be bitCounter
+    }
+}
+
+__global__ void findOffset(unsigned int *input, int n,
+                        unsigned int *output) {
+    __shared__ unsigned int temp[BLOCK_SIZE * 2];                  
+    int chunk = blockDim.x * gridDim.x;
+    
+    unsigned int t = threadIdx.x;
+    unsigned int start = 2 * blockIdx.x * blockDim.x;
+
+    for (int i = start; i < n; i += chunk){
+        if(i + t < n){
+            temp[t] = input[i + t];
+        } else {
+            temp[t] = 0;
+        }
+
+        if (i + blockDim.x + t < n)
+            temp[blockDim.x + t] = input[i + blockDim.x + t];
+        else
+            temp[blockDim.x + t] = 0;
+
+        for (unsigned int stride = 1; stride <= blockDim.x; stride *= 2) {
+            __syncthreads();
+            int index = (t + 1) * stride * 2 - 1;
+            if (index < 2 * blockDim.x)
+                temp[index] += temp[index - stride];
+        }
+
+        for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+            __syncthreads();
+            int index = (t + 1) * stride * 2 - 1;
+            if (index + stride < 2 * blockDim.x)
+                temp[index + stride] += temp[index];
+        }
+        __syncthreads();
+        if (i + t < n)
+            output[i + t] = temp[t];
+        if (i + blockDim.x + t < n)
+            output[i + blockDim.x + t] = temp[blockDim.x + t];
+    }
+}
+
+// __global__ void findOffset(unsigned int *input, int n,
+//                         unsigned int *output) {
+//     __shared__ unsigned int temp[BLOCK_SIZE * 2];
+
+//     unsigned int t = threadIdx.x;
+//     unsigned int start = 2 * blockIdx.x * blockDim.x;
+
+//     if (start + t < n)
+//         temp[t] = input[start + t];
+//     else
+//         temp[t] = 0;
+
+//     if (start + blockDim.x + t < n)
+//         temp[blockDim.x + t] = input[start + blockDim.x + t];
+//     else
+//         temp[blockDim.x + t] = 0;
+
+//     for (unsigned int stride = 1; stride <= blockDim.x; stride *= 2) {
+//         __syncthreads();
+//         int index = (t + 1) * stride * 2 - 1;
+//         if (index < 2 * blockDim.x)
+//             temp[index] += temp[index - stride];
+//     }
+
+//     for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
+//         __syncthreads();
+//         int index = (t + 1) * stride * 2 - 1;
+//         if (index + stride < 2 * blockDim.x)
+//             temp[index + stride] += temp[index];
+//     }
+//     __syncthreads();
+//     if (start + t < n)
+//         output[start + t] = temp[t];
+//     if (start + blockDim.x + t < n)
+//         output[start + blockDim.x + t] = temp[blockDim.x + t];
+//}
+
+__global__ void addBlockSum( unsigned int *input, int blockSize, int n,
+                        unsigned int *output) {
+    int blockSum = 0;
+    int blockStart = blockIdx.x * blockSize * 2;
+    if(blockStart < n){
+        for(int i = blockStart - 1; i >= 0; i -= blockSize * 2){
+            blockSum += input[i];
+        }
+        // First half of block
+        int index = blockStart + threadIdx.x;
+        if (index < n) {
+            output[index] = input[index] + blockSum;
+        }
+        // Second half of block
+        index += blockSize;
+        if (index < n) {
+            output[index] = input[index] + blockSum;
+        }
+    }
+
+    __syncthreads();
+}
+
+__device__ int binarySearch(const unsigned int* offsets, int numOffsets, int target){
+    int low = 0;
+    int high = numOffsets - 1;
+    int leftIndex = -1;
+
+    while (low <= high){
+        int mid = low + (high - low) / 2;
+        
+        if(offsets[mid] == target){
+            return mid;
+        }
+        else if(offsets[mid] < target){
+            //update leftIndex and search upper half
+            leftIndex = mid;
+            low = mid + 1;
+        } else {
+            //search the lower half
+            high = mid - 1;
+        }
+    }
+    return leftIndex;
+}
+
+__global__ void encodeFromCW(const unsigned char *data, long int originalFileSize, unsigned char bufferByte,
+                            char* transformationStrings, const int* transformationLengths, const int *transformationStringsOffset, 
+                            const unsigned int *CW_offsets, const unsigned int* CW_lengths, const long int compressedFileSize, 
+                            uint8_t *outputs) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x; // example index = 88, index * 8 = 704
+    int stride = blockDim.x * gridDim.x;
+    for (int i = index; i * 8 < compressedFileSize; i += stride)
+    {
+        uint8_t out = 0;
+        // These two index can be used 
+        int offset_index_left = binarySearch(CW_offsets, originalFileSize/2+1, index*8); // examply CW_offsets[offset_index_start] = 697
+        int offset_index_right = offset_index_left + 1; // CW_offsets[offset_index_end] = example 709
+
+        if(offset_index_left >= 0){
+            // the transformation string related to the character to the left of index in offsets array
+            unsigned short symbol_left = (data[offset_index_left * 2 + 1] << 8) | data[offset_index_left * 2];
+            int t_string_left_offset = transformationStringsOffset[symbol_left];
+            int t_string_left_length = transformationLengths[symbol_left];
+            if( offset_index_right < originalFileSize/2){
+                // the transformation string related to the character to the right of index in offsets array
+                unsigned short symbol_right = (data[offset_index_right * 2 + 1] << 8) | data[offset_index_right * 2];
+                int t_string_right_offset = transformationStringsOffset[symbol_right];
+                int t_string_right_length = transformationLengths[symbol_right];
+
+                int n = CW_offsets[offset_index_right] - index*8;
+                if (n <= 8) {
+                    // Take the last n bits of the t_string_left.
+                    int bitToTake = 8;
+                    for(int i = n - 1; i >= 0; i--){
+                        out = out << 1;
+                        if(transformationStrings[t_string_left_offset + t_string_left_length - 1 - i] == '1'){
+                            out = out | 1;
+                        } 
+                        bitToTake -= 1;
+                    }
+
+                    while(bitToTake > 0){
+                        int rightSideLen = bitToTake <= t_string_right_length ? bitToTake: t_string_right_length;
+                        for(int i = 0; i < rightSideLen; i++){
+                            out = out << 1;
+                            if(transformationStrings[t_string_right_offset + i] == '1'){
+                                out = out | 1;
+                            }
+                            bitToTake -= 1;
+                        }
+                        if(bitToTake > 0){
+                            offset_index_right += 1; //Prepare for next while loop iteration IF needed
+                            symbol_right = (data[offset_index_right * 2 + 1] << 8) | data[offset_index_right * 2];
+                            t_string_right_offset = transformationStringsOffset[symbol_right];
+                            t_string_right_length = transformationLengths[symbol_right];
+                        }
+                    }            
+                }
+                else {
+                    // Take 8 bits from t_string_left, starting from t_string_left_offset + left_shift
+                    int left_shift = index - CW_offsets[offset_index_left];
+                    for(int i = 0; i < 8; i++){
+                        out = out << 1;
+                        if(transformationStrings[t_string_left_offset + left_shift + i] == '1'){
+                            out = out | 1;
+                        }
+                    }
+                }
+            } else {
+                // The last CW
+                int n = CW_offsets[offset_index_left] + transformationLengths[symbol_left] - index*8;
+                printf("last CW n = %d\n", n);
+                if (n <= 8) {
+                    // Take the last n bits of the t_string_left.
+                    for(int i = n - 1; i >= 0; i--){
+                        out = out << 1;
+                        if(transformationStrings[t_string_left_offset + t_string_left_length - 1 - i] == '1'){
+                            out = out | 1;
+                        } 
+                    }
+                } else {
+                    // Take 8 bits from t_string_left, starting from t_string_left_offset + left_shift
+                    int left_shift = index - CW_offsets[offset_index_left];
+                    for(int i = 0; i < 8; i++){
+                        out = out << 1;
+                        if(transformationStrings[t_string_left_offset + left_shift + i] == '1'){
+                            out = out | 1;
+                        } 
+                    }
+                }
+
+            }
+            
+        } else {
+            // Only here if it's the first character (index = 0) and CW_offests[0] > 0
+            unsigned short symbol_right = (data[1] << 8) | data[0];
+            int t_string_right_offset = transformationStringsOffset[symbol_right];
+            int t_string_right_length = transformationLengths[symbol_right];
+
+            out = out | bufferByte;
+            for(int i = 0; i < 8 - CW_offsets[0]; i++){
+                out = out << 1;
+                if(transformationStrings[t_string_right_offset + i] == '1'){
+                    out = out | 1;
+                }
+            }
+        }
+        outputs[index] = out;
+    }
+
+    
+    // if(index * 8 < compressedFileSize){
+        
+    // }
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -107,7 +358,7 @@ int main(int argc, char *argv[])
                originalFileSize * sizeof(unsigned char),
                cudaMemcpyHostToDevice);
 
-    int blockSize = 256;
+    int blockSize = BLOCK_SIZE;
     int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
     calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
                                                  d_freqCount);
@@ -126,8 +377,8 @@ int main(int argc, char *argv[])
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
     // Free unused memory.
-    cudaFree(d_fileData);
-    cudaFreeHost(fileData);
+    //cudaFree(d_fileData);
+    //cudaFreeHost(fileData);
 
     thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
     thrust::device_vector<unsigned int> indicesVec(kMaxSymbolSize);
@@ -243,14 +494,137 @@ int main(int argc, char *argv[])
         }
     }
 
-    FILE *originalFilePtr = fopen(argv[1], "rb");
     // Writing the size of the file, its name, and its content in the
     // compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
-    writeFileContent(originalFilePtr, originalFileSize,
-                     transformationStrings.data(), bufferByte, bitCounter,
-                     compressedFilePtr);
-    fclose(originalFilePtr);
+
+    // Calculating and Writing the content of the compressed file
+    std::vector<int> h_transformationLengths;
+    std::vector<int> h_transformationStringOffsets;
+    unsigned int* h_data_lengths = (unsigned int *) malloc((originalFileSize/2 + 1) * sizeof(int));
+    unsigned int* h_last_CW_length = (unsigned int*) malloc(sizeof(int));   // For tracking the last CW length to calculate total size of compressed file
+    unsigned int* h_offsets = (unsigned int *) malloc((originalFileSize/2 + 1) * sizeof(int));
+    unsigned int* h_lastOffset = (unsigned int*) malloc(sizeof(int));   // For tracking the total offsets to calculate total size of compressed file
+    uint8_t *h_encode_buffer;
+
+    h_transformationLengths.reserve(transformationStrings.size()); // Reserve space to avoid unnecessary reallocations
+    std::transform(transformationStrings.begin(), transformationStrings.end(), std::back_inserter(h_transformationLengths), [](const std::string& str) {
+        return str.length();
+    });
+
+    long int totalChars = 0;
+    for(const int len: h_transformationLengths){
+        h_transformationStringOffsets.push_back(totalChars);
+        totalChars += len; 
+    }
+
+    int* d_transformationLengths;
+    unsigned int* d_data_lengths;
+    unsigned int* d_offsets_t; // Transitional array, which is used to calculate final d_offsets
+    unsigned int* d_offsets; 
+    char* d_transformationStringsPool;
+    int* d_transformationStringOffsets;
+    uint8_t *d_encode_buffer;
+
+    cudaMalloc((void**) &d_transformationLengths, transformationStrings.size() * sizeof(int));
+    cudaMalloc((void**) &d_data_lengths, (originalFileSize/2 + 1) * sizeof(int));
+    cudaMalloc((void**) &d_offsets_t, (originalFileSize/2 + 1) * sizeof(int));
+    cudaMalloc((void**) &d_offsets, (originalFileSize/2 + 1) * sizeof(int));
+    cudaMalloc((void**) &d_transformationStringsPool, totalChars * sizeof(unsigned char));
+    cudaMalloc((void**) &d_transformationStringOffsets, transformationStrings.size() * sizeof(int));
+
+    cudaMemcpy(d_transformationLengths, h_transformationLengths.data(),
+               transformationStrings.size() * sizeof(int),
+               cudaMemcpyHostToDevice);
+    
+    const char* h_transformationStringPool = std::accumulate(transformationStrings.begin(), transformationStrings.end(), std::string("")).c_str(); // Convert vector of strings to one string to be sent to the kernel
+    // Unknown bug: if h_transformationStringPool is defined at where all the other host variables, it will be empty by the time i t reaches cudaMemcpy
+
+    cudaMemcpy(d_transformationStringsPool, h_transformationStringPool,
+               totalChars * sizeof(char),
+               cudaMemcpyHostToDevice);
+
+
+    cudaMemcpy(d_transformationStringOffsets, h_transformationStringOffsets.data(),
+               transformationStrings.size() * sizeof(int),
+               cudaMemcpyHostToDevice);
+
+    cudaMemcpy(&d_data_lengths[0], &bitCounter, sizeof(int), cudaMemcpyHostToDevice); // Set the first value to be the bitCounter for offset purposes
+    populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths);
+    cuda_check(cudaGetLastError());
+    
+    //cudaDeviceSynchronize();
+    findOffset<<<numBlocks, blockSize>>>(d_data_lengths, (originalFileSize/2 + 1), d_offsets_t);
+    cuda_check(cudaGetLastError());
+
+    cudaDeviceSynchronize();
+    addBlockSum<<<numBlocks, blockSize>>>(d_offsets_t, blockSize, (originalFileSize/2 + 1), d_offsets);
+    cuda_check(cudaGetLastError());
+
+    cudaDeviceSynchronize();
+   
+    cudaMemcpy( h_lastOffset, d_offsets + originalFileSize/2, sizeof(int), cudaMemcpyDeviceToHost );
+    cudaMemcpy( h_last_CW_length, d_data_lengths + originalFileSize/2, sizeof(int), cudaMemcpyDeviceToHost );
+    // // h_lastOffset contains the number of bits that needs to be allocated.
+    long int compressedContentFileSize = h_lastOffset[0];
+    long int compressedContentFileSizeAllocation = compressedContentFileSize;
+
+
+    if(compressedContentFileSizeAllocation % 8 != 0){
+        compressedContentFileSizeAllocation += 8 - (compressedContentFileSizeAllocation % 8);
+    }
+
+    cudaMalloc((void**) &d_encode_buffer, compressedContentFileSizeAllocation);
+    h_encode_buffer = (uint8_t*) malloc(compressedContentFileSizeAllocation);
+
+    // TODO: Remove this normally, use for debugging
+	cuda_check(cudaMemcpy( h_data_lengths, d_data_lengths, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost ));
+	cuda_check(cudaMemcpy( h_offsets, d_offsets, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost ));
+
+    // for(long int i = 0; i < (originalFileSize/2 + 1); i++){
+    //     std::cout << h_offsets[i] << " ";
+    // }
+
+    int sum = bitCounter;
+    for(long int i = 0; i < (originalFileSize/2 + 1); i++){
+        // std::cout << h_offsets[i] << " ";
+        if (sum != h_offsets[i]){
+            std::cout << std::endl;
+            std::cout << "h_offsets[i] does not match sum (h_offsets[i], sum, index): (" << h_offsets[i] << ", " << sum << ", " << i << ")" << std::endl;
+            break;
+        }
+        if(i < originalFileSize/2){
+            unsigned short readBuf = (fileData[i * 2 + 1] << 8) | fileData[i * 2];
+            sum += h_transformationLengths[readBuf];
+            if(h_data_lengths[i + 1] != h_transformationLengths[readBuf]){
+                std:: cout << std::endl;
+                std::cout << "h_data_lengths[i+1] does not match (h_data_lengths[i], h_transformationLengths[readBuf], index): (" << h_data_lengths[i+1] << ", " << h_transformationLengths[readBuf] << ", " << i << ")" << std::endl;
+                break;
+            }
+        }
+    }
+
+    encodeFromCW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, bufferByte,
+                                            d_transformationStringsPool, d_transformationLengths, d_transformationStringOffsets, 
+                                            d_offsets, d_data_lengths, compressedContentFileSizeAllocation, 
+                                            d_encode_buffer);
+    cudaDeviceSynchronize();
+    
+
+
+    cuda_check(cudaMemcpy( h_encode_buffer, d_encode_buffer, compressedContentFileSize, cudaMemcpyDeviceToHost));
+
+    // std::cout << "Compressed binary: " << std::endl;
+    // for(long int i = 0; i < compressedContentFileSizeAllocation / 8; i++){
+    //     uint8_t temp = h_encode_buffer[i];
+    //     std::bitset<8> x(temp);
+
+    //     std::cout << x << " ";
+    //     // std::cout << temp << " ";
+    // }
+    // std::cout << "end" << std::endl;
+
+    writeFileContent(h_encode_buffer, compressedContentFileSize, compressedContentFileSizeAllocation, bufferByte, bitCounter, compressedFilePtr);
 
     // Ensuring the last byte is written to the compressed file by aligning
     // the bit counter.
@@ -325,29 +699,46 @@ void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter,
 
 // Below function translates and writes bytes from current input file to the
 // compressed file.
-void writeFileContent(FILE *originalFilePtr, long int originalFileSize,
-                      string *transformationStrings, unsigned char &bufferByte,
-                      int &bitCounter, FILE *compressedFilePtr)
-{
-    unsigned short readBuf;
-    unsigned char *readBufPtr;
-    readBufPtr = (unsigned char *)&readBuf;
-    while (fread(readBufPtr, 2, 1, originalFilePtr))
-    {
-        char *strPointer = &transformationStrings[readBuf][0];
-        while (*strPointer)
-        {
-            writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
+// void writeFileContent(FILE *originalFilePtr, long int originalFileSize,
+//                       string *transformationStrings, unsigned char &bufferByte,
+//                       int &bitCounter, FILE *compressedFilePtr)
+// {
+//     unsigned short readBuf;
+//     unsigned char *readBufPtr;
+//     readBufPtr = (unsigned char *)&readBuf;
+//     while (fread(readBufPtr, 2, 1, originalFilePtr))
+//     {
+//         char *strPointer = &transformationStrings[readBuf][0];
+//         while (*strPointer)
+//         {
+//             writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
 
-            bufferByte <<= 1;
-            if (*strPointer == '1')
-            {
-                bufferByte |= 1;
-            }
-            bitCounter++;
-            strPointer++;
+//             bufferByte <<= 1;
+//             if (*strPointer == '1')
+//             {
+//                 bufferByte |= 1;
+//             }
+//             bitCounter++;
+//             strPointer++;
+//         }
+//     }
+// }
+
+void writeFileContent(uint8_t* encode_buffer, long int fileSize, long int fileSizeAllocated, unsigned char &bufferByte, int&bitCounter, FILE *compressedFilePtr) {
+    // Note that all previous bits in buffer is written to file, update bitCounter and bufferByte
+    uint8_t last_byte = encode_buffer[fileSizeAllocated/8 - 1];
+    long int extraAllocation = fileSizeAllocated - fileSize; // Possible values from 0 to 7 inclusive
+    long int bytesToWrite = extraAllocation == 0 ? fileSizeAllocated/8 : fileSizeAllocated/8 - 1;
+    bitCounter = extraAllocation == 0 ? 0 : 8 - extraAllocation;
+    for(int i = 0; i < bitCounter; i++){
+        bufferByte <<= 1;
+        if((last_byte & 1) == 1){
+            bufferByte |= 1;
         }
+        last_byte >>= 1;
     }
+    
+    fwrite(encode_buffer, bytesToWrite, 1, compressedFilePtr); 
 }
 
 long int sizeOfTheFile(char *path)
