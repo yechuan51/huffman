@@ -520,6 +520,9 @@ int main(int argc, char *argv[])
     // compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
 
+
+    struct timeval start_encode, end_encode;
+    gettimeofday(&start_encode, NULL);
     // Calculating and Writing the content of the compressed file
     std::vector<int> h_transformationLengths;
     std::vector<int> h_transformationStringOffsets;
@@ -555,12 +558,19 @@ int main(int argc, char *argv[])
     cudaMalloc((void**) &d_transformationStringsPool, totalChars * sizeof(unsigned char));
     cudaMalloc((void**) &d_transformationStringOffsets, transformationStrings.size() * sizeof(int));
 
+    
     cudaMemcpy(d_transformationLengths, h_transformationLengths.data(),
                transformationStrings.size() * sizeof(int),
                cudaMemcpyHostToDevice);
     
-    const char* h_transformationStringPool = std::accumulate(transformationStrings.begin(), transformationStrings.end(), std::string("")).c_str(); // Convert vector of strings to one string to be sent to the kernel
+    
+    string transformationStringPool = "";
+    for(int i = 0; i < kMaxSymbolSize; i++){
+        transformationStringPool += transformationStrings[i];
+    }
+    const char* h_transformationStringPool = transformationStringPool.c_str(); 
     // Unknown bug: if h_transformationStringPool is defined at where all the other host variables, it will be empty by the time i t reaches cudaMemcpy
+    
 
     cudaMemcpy(d_transformationStringsPool, h_transformationStringPool,
                totalChars * sizeof(char),
@@ -572,9 +582,9 @@ int main(int argc, char *argv[])
                cudaMemcpyHostToDevice);
 
     cudaMemcpy(&d_data_lengths[0], &bitCounter, sizeof(int), cudaMemcpyHostToDevice); // Set the first value to be the bitCounter for offset purposes
+
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths);
 
-    //cudaDeviceSynchronize();
     findOffset<<<numBlocks, blockSize>>>(d_data_lengths, (originalFileSize/2 + 1), d_offsets_t);
 
     cudaDeviceSynchronize();
@@ -584,7 +594,7 @@ int main(int argc, char *argv[])
    
     cudaMemcpy( h_lastOffset, d_offsets + originalFileSize/2, sizeof(int), cudaMemcpyDeviceToHost );
     cudaMemcpy( h_last_CW_length, d_data_lengths + originalFileSize/2, sizeof(int), cudaMemcpyDeviceToHost );
-    // // h_lastOffset contains the number of bits that needs to be allocated.
+    // h_lastOffset contains the number of bits that needs to be allocated.
     long int compressedContentFileSize = h_lastOffset[0];
     long int compressedContentFileSizeAllocation = compressedContentFileSize;
 
@@ -597,56 +607,21 @@ int main(int argc, char *argv[])
     h_encode_buffer = (uint8_t*) malloc(compressedContentFileSizeAllocation);
     std::cout << "Number of bytes allocated for h_encode_buffer: " << compressedContentFileSizeAllocation << std::endl;
 
-    // TODO: Remove this normally, use for debugging
-	cuda_check(cudaMemcpy( h_data_lengths, d_data_lengths, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost ));
-	cuda_check(cudaMemcpy( h_offsets, d_offsets, (originalFileSize/2 + 1) * sizeof(int), cudaMemcpyDeviceToHost ));
-
-    // for(long int i = 0; i < (originalFileSize/2 + 1); i++){
-    //     std::cout << h_offsets[i] << " ";
-    // }
-
-    int sum = bitCounter;
-    for(long int i = 0; i < (originalFileSize/2 + 1); i++){
-        // std::cout << h_offsets[i] << " ";
-        if (sum != h_offsets[i]){
-            std::cout << std::endl;
-            std::cout << "h_offsets[i] does not match sum (h_offsets[i], sum, index): (" << h_offsets[i] << ", " << sum << ", " << i << ")" << std::endl;
-            break;
-        }
-        if(i < originalFileSize/2){
-            unsigned short readBuf = (fileData[i * 2 + 1] << 8) | fileData[i * 2];
-            sum += h_transformationLengths[readBuf];
-            if(h_data_lengths[i + 1] != h_transformationLengths[readBuf]){
-                std:: cout << std::endl;
-                std::cout << "h_data_lengths[i+1] does not match (h_data_lengths[i], h_transformationLengths[readBuf], index): (" << h_data_lengths[i+1] << ", " << h_transformationLengths[readBuf] << ", " << i << ")" << std::endl;
-                break;
-            }
-        }
-    }
-
-    //numBlocks = (compressedContentFileSizeAllocation + blockSize - 1) / blockSize;
-
     encodeFromCW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, bufferByte,
                                             d_transformationStringsPool, d_transformationLengths, d_transformationStringOffsets, 
                                             d_offsets, d_data_lengths, compressedContentFileSizeAllocation, 
                                             d_encode_buffer);
     cuda_check(cudaGetLastError());
     cudaDeviceSynchronize();
-    
 
     cuda_check(cudaMemcpy( h_encode_buffer, d_encode_buffer, compressedContentFileSize, cudaMemcpyDeviceToHost));
 
-    // std::cout << "Compressed binary: " << std::endl;
-    // for(long int i = 0; i < compressedContentFileSizeAllocation / 8; i++){
-    //     uint8_t temp = h_encode_buffer[i];
-    //     std::bitset<8> x(temp);
-
-    //     std::cout << x << " ";
-    //     // std::cout << temp << " ";
-    // }
-    // std::cout << "end" << std::endl;
-
     writeFileContent(h_encode_buffer, compressedContentFileSize, compressedContentFileSizeAllocation, bufferByte, bitCounter, compressedFilePtr);
+
+    gettimeofday(&end_encode, NULL);
+    double encode_elapsedTime = (end_encode.tv_sec - start_encode.tv_sec) * 1000.0;
+    encode_elapsedTime += (end_encode.tv_usec - start_encode.tv_usec) / 1000.0;
+    std::cout << "Encoding took " << encode_elapsedTime << " ms" << endl;
 
     // Ensuring the last byte is written to the compressed file by aligning
     // the bit counter.
