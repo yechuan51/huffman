@@ -130,8 +130,6 @@ __global__ void addBlockSum( unsigned int *input, int blockSize, int n,
             output[index] = input[index] + blockSum;
         }
     }
-
-    __syncthreads();
 }
 
 __device__ int binarySearch(const unsigned int* offsets, int numOffsets, int target){
@@ -335,7 +333,6 @@ int main(int argc, char *argv[])
 
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
-    thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
     thrust::device_vector<unsigned int> indicesVec(kMaxSymbolSize);
     thrust::sequence(thrust::device, indicesVec.begin(), indicesVec.end());
     thrust::sort_by_key(d_freqCountVec.begin(), d_freqCountVec.end(), indicesVec.begin());
