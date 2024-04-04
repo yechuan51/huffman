@@ -18,7 +18,7 @@
 
 #include "gpuHuffmanConstruction.h"
 
-#define BLOCK_SIZE 256
+// #define BLOCK_SIZE 256
 
 using namespace std;
 
@@ -70,7 +70,7 @@ __global__ void populateCWLength(const unsigned char *data, long int size, const
 
 __global__ void findOffset(unsigned int *input, int n,
                         unsigned int *output) {
-    __shared__ unsigned int temp[BLOCK_SIZE * 2];                  
+    extern __shared__ unsigned int temp[];                  
     int chunk = blockDim.x * gridDim.x;
     
     unsigned int t = threadIdx.x;
@@ -315,7 +315,7 @@ int main(int argc, char *argv[])
                originalFileSize * sizeof(unsigned char),
                cudaMemcpyHostToDevice);
 
-    int blockSize = BLOCK_SIZE;
+    int blockSize = 256;
     int numBlocks = (originalFileSize / 2 + blockSize - 1) / blockSize;
     calculateFrequency<<<numBlocks, blockSize>>>(d_fileData, originalFileSize,
                                                  d_freqCount);
@@ -512,7 +512,7 @@ int main(int argc, char *argv[])
 
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths);
 
-    findOffset<<<numBlocks, blockSize>>>(d_data_lengths, (originalFileSize/2 + 1), d_offsets_t);
+    findOffset<<<numBlocks, blockSize, blockSize * 2 * sizeof(unsigned int)>>>(d_data_lengths, (originalFileSize/2 + 1), d_offsets_t);
 
     cudaDeviceSynchronize();
     addBlockSum<<<numBlocks, blockSize>>>(d_offsets_t, blockSize, (originalFileSize/2 + 1), d_offsets);
