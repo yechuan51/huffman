@@ -109,43 +109,6 @@ __global__ void findOffset(unsigned int *input, int n,
     }
 }
 
-// __global__ void findOffset(unsigned int *input, int n,
-//                         unsigned int *output) {
-//     __shared__ unsigned int temp[BLOCK_SIZE * 2];
-
-//     unsigned int t = threadIdx.x;
-//     unsigned int start = 2 * blockIdx.x * blockDim.x;
-
-//     if (start + t < n)
-//         temp[t] = input[start + t];
-//     else
-//         temp[t] = 0;
-
-//     if (start + blockDim.x + t < n)
-//         temp[blockDim.x + t] = input[start + blockDim.x + t];
-//     else
-//         temp[blockDim.x + t] = 0;
-
-//     for (unsigned int stride = 1; stride <= blockDim.x; stride *= 2) {
-//         __syncthreads();
-//         int index = (t + 1) * stride * 2 - 1;
-//         if (index < 2 * blockDim.x)
-//             temp[index] += temp[index - stride];
-//     }
-
-//     for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
-//         __syncthreads();
-//         int index = (t + 1) * stride * 2 - 1;
-//         if (index + stride < 2 * blockDim.x)
-//             temp[index + stride] += temp[index];
-//     }
-//     __syncthreads();
-//     if (start + t < n)
-//         output[start + t] = temp[t];
-//     if (start + blockDim.x + t < n)
-//         output[start + blockDim.x + t] = temp[blockDim.x + t];
-//}
-
 __global__ void addBlockSum( unsigned int *input, int blockSize, int n,
                         unsigned int *output) {
     int stride = blockDim.x * gridDim.x;
@@ -170,32 +133,6 @@ __global__ void addBlockSum( unsigned int *input, int blockSize, int n,
 
     __syncthreads();
 }
-
-// __global__ void addBlockSum( unsigned int *input, int blockSize, int n,
-//                         unsigned int *output) {
-//     int blockSum = 0;
-//     int blockStart = blockIdx.x * blockSize * 2;
-//     if(blockIdx.x * blockDim.x + threadIdx.x == 0){
-//         printf("gridDim.x * blockDim.x %d\n", gridDim.x * blockDim.x);
-//     }
-//     if(blockStart < n){
-//         for(int i = blockStart - 1; i >= 0; i -= blockSize * 2){
-//             blockSum += input[i];
-//         }
-//         // First half of block
-//         int index = blockStart + threadIdx.x;
-//         if (index < n) {
-//             output[index] = input[index] + blockSum;
-//         }
-//         // Second half of block
-//         index += blockSize;
-//         if (index < n) {
-//             output[index] = input[index] + blockSum;
-//         }
-//     }
-
-//     __syncthreads();
-// }
 
 __device__ int binarySearch(const unsigned int* offsets, int numOffsets, int target){
     int low = 0;
@@ -222,7 +159,7 @@ __device__ int binarySearch(const unsigned int* offsets, int numOffsets, int tar
 
 __global__ void encodeFromCW(const unsigned char *data, long int originalFileSize, unsigned char bufferByte,
                             char* transformationStrings, const int* transformationLengths, const int *transformationStringsOffset, 
-                            const unsigned int *CW_offsets, const unsigned int* CW_lengths, const long int compressedFileSize, 
+                            const unsigned int *CW_offsets, const long int compressedFileSize, 
                             uint8_t *outputs) {
     int start = blockIdx.x * blockDim.x + threadIdx.x; // example index = 88, index * 8 = 704
     int stride = blockDim.x * gridDim.x;
@@ -398,10 +335,6 @@ int main(int argc, char *argv[])
 
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
-    // Free unused memory.
-    //cudaFree(d_fileData);
-    //cudaFreeHost(fileData);
-
     thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
     thrust::device_vector<unsigned int> indicesVec(kMaxSymbolSize);
 
@@ -520,7 +453,7 @@ int main(int argc, char *argv[])
     // compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
 
-
+    // ---------------------- ENCODING ----------------------
     struct timeval start_encode, end_encode;
     gettimeofday(&start_encode, NULL);
     // Calculating and Writing the content of the compressed file
@@ -569,8 +502,6 @@ int main(int argc, char *argv[])
         transformationStringPool += transformationStrings[i];
     }
     const char* h_transformationStringPool = transformationStringPool.c_str(); 
-    // Unknown bug: if h_transformationStringPool is defined at where all the other host variables, it will be empty by the time i t reaches cudaMemcpy
-    
 
     cudaMemcpy(d_transformationStringsPool, h_transformationStringPool,
                totalChars * sizeof(char),
@@ -609,7 +540,7 @@ int main(int argc, char *argv[])
 
     encodeFromCW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, bufferByte,
                                             d_transformationStringsPool, d_transformationLengths, d_transformationStringOffsets, 
-                                            d_offsets, d_data_lengths, compressedContentFileSizeAllocation, 
+                                            d_offsets, compressedContentFileSizeAllocation, 
                                             d_encode_buffer);
     cuda_check(cudaGetLastError());
     cudaDeviceSynchronize();
@@ -633,6 +564,17 @@ int main(int argc, char *argv[])
 
     fclose(compressedFilePtr);
 
+    // Free unused memory.
+    cudaFree(d_fileData);
+    cudaFreeHost(fileData);
+    cudaFree(d_transformationLengths);
+    cudaFree(d_data_lengths);
+    cudaFree(d_offsets_t);
+    cudaFree(d_offsets);
+    cudaFree(d_transformationStringsPool);
+    cudaFree(d_transformationStringOffsets);
+    cudaFree(d_encode_buffer);
+   
     // Get the size of compressed file.
     long int compressedFileSize = sizeOfTheFile(&scompressed[0]);
     std::cout << "The size of the COMPRESSED file is: " << compressedFileSize
