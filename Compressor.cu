@@ -326,18 +326,17 @@ int main(int argc, char *argv[])
     cudaMemcpy(freqCount.data(), d_freqCount,
                kMaxSymbolSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
-    thrust::device_vector<unsigned int> dev_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
+    thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
     unsigned int uniqueSymbolCount = thrust::count_if(
         thrust::device,
-        dev_freqCountVec.begin(),
-        dev_freqCountVec.end(),
+        d_freqCountVec.begin(),
+        d_freqCountVec.end(),
         thrust::placeholders::_1 > 0);
 
     std::cout << "Unique symbols count: " << uniqueSymbolCount << endl;
 
     thrust::device_vector<unsigned int> d_freqCountVec(d_freqCount, d_freqCount + kMaxSymbolSize);
     thrust::device_vector<unsigned int> indicesVec(kMaxSymbolSize);
-
     thrust::sequence(thrust::device, indicesVec.begin(), indicesVec.end());
     thrust::sort_by_key(d_freqCountVec.begin(), d_freqCountVec.end(), indicesVec.begin());
 
@@ -638,31 +637,6 @@ void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter,
 
 // Below function translates and writes bytes from current input file to the
 // compressed file.
-// void writeFileContent(FILE *originalFilePtr, long int originalFileSize,
-//                       string *transformationStrings, unsigned char &bufferByte,
-//                       int &bitCounter, FILE *compressedFilePtr)
-// {
-//     unsigned short readBuf;
-//     unsigned char *readBufPtr;
-//     readBufPtr = (unsigned char *)&readBuf;
-//     while (fread(readBufPtr, 2, 1, originalFilePtr))
-//     {
-//         char *strPointer = &transformationStrings[readBuf][0];
-//         while (*strPointer)
-//         {
-//             writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
-
-//             bufferByte <<= 1;
-//             if (*strPointer == '1')
-//             {
-//                 bufferByte |= 1;
-//             }
-//             bitCounter++;
-//             strPointer++;
-//         }
-//     }
-// }
-
 void writeFileContent(uint8_t* encode_buffer, long int fileSize, long int fileSizeAllocated, unsigned char &bufferByte, int&bitCounter, FILE *compressedFilePtr) {
     // Note that all previous bits in buffer is written to file, update bitCounter and bufferByte
     uint8_t last_byte = encode_buffer[fileSizeAllocated/8 - 1];
