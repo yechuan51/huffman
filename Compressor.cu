@@ -32,13 +32,6 @@ void writeFileContent(uint8_t *, long int, long int, unsigned char &, int &,
                       FILE *);
 void writeIfFullBuffer(unsigned char &, int &, FILE *);
 
-struct TreeNode
-{ // this structure will be used to create the translation tree
-    TreeNode *left, *right;
-    unsigned short character;
-    string bit;
-};
-
 __global__ void calculateFrequency(const unsigned char *data, long int size,
                                    unsigned int *freqCount)
 {
@@ -402,22 +395,11 @@ int main(int argc, char *argv[])
 
     cuda_check(cudaFree(d_freqCount));
 
-    // TODO: Remove this
-    // Step 1: Initialize the leaf nodes for Huffman tree construction.
-    // Each leaf node represents a unique byte and its frequency in the input
-    // data. TreeNode nodesForHuffmanTree[uniqueSymbolCount * 2 - 1];
-    TreeNode *nodesForHuffmanTree = new TreeNode[uniqueSymbolCount * 2 - 1];
-    TreeNode *currentNode = nodesForHuffmanTree;
-
-    // Step 2: Fill the array with data for each unique byte.
-    for (size_t i = 0; i < freqCount.size(); ++i)
-    {
-        if (freqCount[i] != 0)
-        {
-            currentNode->right = nullptr;
-            currentNode->left = nullptr;
-            currentNode->character = static_cast<unsigned short>(sortedIndices[i]);
-            currentNode++;
+    std::vector<unsigned short> uniqueSymbols;
+    uniqueSymbols.reserve(uniqueSymbolCount);
+    for (size_t i = 0; i < freqCount.size(); ++i) {
+        if (freqCount[i] != 0) {
+            uniqueSymbols.push_back(static_cast<unsigned short>(sortedIndices[i]));
         }
     }
 
@@ -450,11 +432,8 @@ int main(int argc, char *argv[])
     int nodeIndex = 0;
     for (auto const &CW : codewords)
     {
-        // Store the transformation string for the current character in the
-        // array.
-        auto node = nodesForHuffmanTree[nodeIndex];
-        nodeIndex++;
-        auto character = node.character;
+        unsigned short character = uniqueSymbols[nodeIndex];
+        
         transformationStrings[character] = CW;
         unsigned char transformationLength = CW.length();
         unsigned short currentCharacter = character;
@@ -479,6 +458,7 @@ int main(int argc, char *argv[])
             transformationStringPtr++;
             writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
         }
+        nodeIndex++;
     }
 
     // Writing the size of the file, its name, and its content in the
