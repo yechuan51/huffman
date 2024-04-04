@@ -12,6 +12,7 @@ clean :
 	@rm -f archive
 	@rm -f extract
 	@rm -f DECOMPRESSED_FILE*
+	@rm -f *.compressed
 
 test :
 	@echo "Build archive and extract"
