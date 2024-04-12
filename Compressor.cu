@@ -684,15 +684,8 @@ void writeFileContent(uint8_t *encode_buffer, long int fileSize, long int fileSi
     long int extraAllocation = fileSizeAllocated - fileSize; // Possible values from 0 to 7 inclusive
     long int bytesToWrite = extraAllocation == 0 ? fileSizeAllocated / 8 : fileSizeAllocated / 8 - 1;
     bitCounter = extraAllocation == 0 ? 0 : 8 - extraAllocation;
-    for (int i = 0; i < bitCounter; i++)
-    {
-        bufferByte <<= 1;
-        if ((last_byte & 1) == 1)
-        {
-            bufferByte |= 1;
-        }
-        last_byte >>= 1;
-    }
+    
+    bufferByte = (char) last_byte;
 
     fwrite(encode_buffer, bytesToWrite, 1, compressedFilePtr);
 }
