@@ -547,7 +547,6 @@ int main(int argc, char *argv[])
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths.data().get());
     // cudaMemcpy(h_data_lengths, d_data_lengths.data().get(), (originalFileSize / 2 + 1) * sizeof(int), cudaMemcpyDeviceToHost);
 
-
     std::cout << "start init thrust" << std::endl;
     thrust::device_vector<long int> d_offsets_output(originalFileSize/2 + 1, 0);
 
