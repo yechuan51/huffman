@@ -15,6 +15,8 @@
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
 #include <thrust/device_vector.h>
+#include <thrust/scan.h>
+#include <thrust/device_ptr.h>
 
 #include "gpuHuffmanConstruction.h"
 
@@ -465,6 +467,8 @@ int main(int argc, char *argv[])
     // compressed format.
     writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
 
+
+    std::cout << "Start Encoding" << std::endl;
     // ---------------------- ENCODING ----------------------
     struct timeval start_encode, end_encode;
     gettimeofday(&start_encode, NULL);
@@ -473,7 +477,7 @@ int main(int argc, char *argv[])
     std::vector<int> h_transformationStringOffsets;
     unsigned int *h_data_lengths = (unsigned int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
     unsigned int *h_last_CW_length = (unsigned int *)malloc(sizeof(int)); // For tracking the last CW length to calculate total size of compressed file
-    unsigned int *h_offsets = (unsigned int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
+    //unsigned int *h_offsets = (unsigned int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
     unsigned int *h_lastOffset = (unsigned int *)malloc(sizeof(int)); // For tracking the total offsets to calculate total size of compressed file
     uint8_t *h_encode_buffer;
 
@@ -526,14 +530,35 @@ int main(int argc, char *argv[])
 
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths);
 
-    findOffset<<<numBlocks, blockSize, blockSize * 2 * sizeof(unsigned int)>>>(d_data_lengths, (originalFileSize / 2 + 1), d_offsets_t);
+    std::cout << "start init thrust" << std::endl;
+    thrust::device_ptr<unsigned int> d_offsets_output = thrust::device_pointer_cast(d_data_lengths);
 
-    cudaDeviceSynchronize();
-    addBlockSum<<<numBlocks, blockSize>>>(d_offsets_t, blockSize, (originalFileSize / 2 + 1), d_offsets);
+    // thrust::device_vector<unsigned int> d_offsets_output(originalFileSize / 2 + 1);
 
-    cudaDeviceSynchronize();
+    try {
+        thrust::inclusive_scan(d_offsets_output, d_offsets_output + originalFileSize / 2 + 1, d_offsets_output);
+    } catch (const thrust::system_error& e) {
+        std::cerr << "Thrust error: " << e.what() << std::endl;
+        return 1;
+    }
 
-    cudaMemcpy(h_lastOffset, d_offsets + originalFileSize / 2, sizeof(int), cudaMemcpyDeviceToHost);
+    // std::vector<unsigned int> h_offsets(originalFileSize / 2 + 1);
+    // thrust::copy(thrust_input, thrust_input + originalFileSize / 2 + 1, h_offsets.begin());
+    // for (int i = 0; i < originalFileSize/2+1; i++){
+    //     std::cout << h_offsets[i] << " ";
+    // }
+    // std::cout << std::endl;
+
+    // findOffset<<<numBlocks, blockSize, blockSize * 2 * sizeof(unsigned int)>>>(d_data_lengths, (originalFileSize / 2 + 1), d_offsets_t);
+
+    // cudaDeviceSynchronize();
+
+    // addBlockSum<<<numBlocks, blockSize>>>(d_offsets_t, blockSize, (originalFileSize / 2 + 1), d_offsets);
+    
+    // cudaDeviceSynchronize();
+
+
+    cudaMemcpy(h_lastOffset, d_offsets_output.get() + originalFileSize / 2, sizeof(int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_last_CW_length, d_data_lengths + originalFileSize / 2, sizeof(int), cudaMemcpyDeviceToHost);
     // h_lastOffset contains the number of bits that needs to be allocated.
     long int compressedContentFileSize = h_lastOffset[0];
@@ -550,8 +575,10 @@ int main(int argc, char *argv[])
 
     encodeFromCW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, bufferByte,
                                            d_transformationStringsPool, d_transformationLengths, d_transformationStringOffsets,
-                                           d_offsets, compressedContentFileSizeAllocation,
+                                           d_offsets_output.get(), compressedContentFileSizeAllocation,
                                            d_encode_buffer);
+
+
     cuda_check(cudaGetLastError());
     cudaDeviceSynchronize();
 
