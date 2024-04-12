@@ -155,16 +155,10 @@ __device__ long int binarySearch(const long int *offsets, long int numOffsets, l
     long int high = numOffsets - 1;
     long int leftIndex = -1;
     int printout = 0;
-    if(target == 109136) {
-        printout = 1;
-    }
 
     while (low <= high)
     {
         long int mid = low + (high - low) / 2;
-        if(printout == 1){
-            printf("mid, offsets[mid]: %ld, %ld\n", mid, offsets[mid]);
-        }
 
         if (offsets[mid] == target)
         {
@@ -500,7 +494,7 @@ int main(int argc, char *argv[])
     // Calculating and Writing the content of the compressed file
     std::vector<int> h_transformationLengths;
     std::vector<int> h_transformationStringOffsets;
-    int *h_data_lengths = (int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
+    // int *h_data_lengths = (int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
     int *h_last_CW_length = (int *)malloc(sizeof(int)); // For tracking the last CW length to calculate total size of compressed file
     //unsigned int *h_offsets = (unsigned int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
     long int *h_lastOffset = (long int *)malloc(sizeof(long int)); // For tracking the total offsets to calculate total size of compressed file
@@ -551,18 +545,8 @@ int main(int argc, char *argv[])
     cudaMemcpy(d_data_lengths.data().get(), &bitCounter, sizeof(int), cudaMemcpyHostToDevice); // Set the first value to be the bitCounter for offset purposes
 
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths.data().get());
-    cudaMemcpy(h_data_lengths, d_data_lengths.data().get(), (originalFileSize / 2 + 1) * sizeof(int), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(h_data_lengths, d_data_lengths.data().get(), (originalFileSize / 2 + 1) * sizeof(int), cudaMemcpyDeviceToHost);
 
-    for (int i = originalFileSize / 2 - 10; i < originalFileSize / 2 + 1; i++){
-        std::cout << h_data_lengths[i] << " ";
-    }
-    std::cout << endl;
-
-    //long int a = 0;
-    //for (int i = 0; i < originalFileSize / 2 + 1; ++i) {
-    //    a += h_data_lengths[i];
-    //}
-    //std::cout << a << "\n";
 
     std::cout << "start init thrust" << std::endl;
     thrust::device_vector<long int> d_offsets_output(originalFileSize/2 + 1, 0);
@@ -576,32 +560,10 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    for (int i = originalFileSize / 2 - 10; i < originalFileSize / 2 + 1; i++){
-        std::cout << d_offsets_output[i] << " ";
-    }
-    std::cout << endl;
-
-    // std::vector<unsigned int> h_offsets(originalFileSize / 2 + 1);
-    // thrust::copy(thrust_input, thrust_input + originalFileSize / 2 + 1, h_offsets.begin());
-    // for (int i = 0; i < originalFileSize/2+1; i++){
-    //     std::cout << h_offsets[i] << " ";
-    // }
-    // std::cout << std::endl;
-
-    // findOffset<<<numBlocks, blockSize, blockSize * 2 * sizeof(unsigned int)>>>(d_data_lengths, (originalFileSize / 2 + 1), d_offsets_t);
-
-    // cudaDeviceSynchronize();
-
-    // addBlockSum<<<numBlocks, blockSize>>>(d_offsets_t, blockSize, (originalFileSize / 2 + 1), d_offsets);
-    
-    // cudaDeviceSynchronize();
-
 
     cudaMemcpy(h_lastOffset, d_offsets_output.data().get() + originalFileSize / 2, sizeof(long int), cudaMemcpyDeviceToHost);
     cudaMemcpy(h_last_CW_length, d_data_lengths.data().get() + originalFileSize / 2, sizeof(int), cudaMemcpyDeviceToHost);
-    // Free d_data_lengths which is not used anymore
     thrust::device_vector<int>().swap(d_data_lengths);
-//    cudaFree(d_data_lengths);
 
     // h_lastOffset contains the number of bits that needs to be allocated.
     long int compressedContentFileSize = h_lastOffset[0];
@@ -616,9 +578,6 @@ int main(int argc, char *argv[])
     h_encode_buffer = (uint8_t *)malloc(compressedContentFileSizeAllocation / 8);
     std::cout << "Number of bytes allocated for h_encode_buffer: " << compressedContentFileSizeAllocation << std::endl;
 
-    for (int i = originalFileSize / 2 - 10; i < originalFileSize / 2 + 1; i++){
-        std::cout << d_offsets_output[i] << " ";
-    }
     encodeFromCW<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, bufferByte,
                                            d_transformationStringsPool, d_transformationLengths, d_transformationStringOffsets,
                                            d_offsets_output.data().get(), compressedContentFileSizeAllocation,
