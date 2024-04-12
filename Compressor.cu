@@ -494,9 +494,7 @@ int main(int argc, char *argv[])
     // Calculating and Writing the content of the compressed file
     std::vector<int> h_transformationLengths;
     std::vector<int> h_transformationStringOffsets;
-    // int *h_data_lengths = (int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
     int *h_last_CW_length = (int *)malloc(sizeof(int)); // For tracking the last CW length to calculate total size of compressed file
-    //unsigned int *h_offsets = (unsigned int *)malloc((originalFileSize / 2 + 1) * sizeof(int));
     long int *h_lastOffset = (long int *)malloc(sizeof(long int)); // For tracking the total offsets to calculate total size of compressed file
     uint8_t *h_encode_buffer;
 
@@ -513,13 +511,11 @@ int main(int argc, char *argv[])
 
     int *d_transformationLengths;
     thrust::device_vector<int> d_data_lengths(originalFileSize / 2 + 1);
-    // unsigned int *d_offsets_t; // Transitional array, which is used to calculate final d_offsets
     char *d_transformationStringsPool;
     int *d_transformationStringOffsets;
     uint8_t *d_encode_buffer;
 
     cudaMalloc((void **)&d_transformationLengths, transformationStrings.size() * sizeof(int));
-    //cudaMalloc((void **)&d_data_lengths, (originalFileSize / 2 + 1) * sizeof(int));
     cudaMalloc((void **)&d_transformationStringsPool, totalChars * sizeof(unsigned char));
     cudaMalloc((void **)&d_transformationStringOffsets, transformationStrings.size() * sizeof(int));
 
@@ -545,12 +541,9 @@ int main(int argc, char *argv[])
     cudaMemcpy(d_data_lengths.data().get(), &bitCounter, sizeof(int), cudaMemcpyHostToDevice); // Set the first value to be the bitCounter for offset purposes
 
     populateCWLength<<<numBlocks, blockSize>>>(d_fileData, originalFileSize, d_transformationLengths, d_data_lengths.data().get());
-    // cudaMemcpy(h_data_lengths, d_data_lengths.data().get(), (originalFileSize / 2 + 1) * sizeof(int), cudaMemcpyDeviceToHost);
 
     std::cout << "start init thrust" << std::endl;
     thrust::device_vector<long int> d_offsets_output(originalFileSize/2 + 1, 0);
-
-    // thrust::device_vector<unsigned int> d_offsets_output(originalFileSize / 2 + 1);
 
     try {
         thrust::transform_inclusive_scan(d_data_lengths.begin(), d_data_lengths.end(), d_offsets_output.begin(), cast(), add());
