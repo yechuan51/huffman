@@ -6,6 +6,8 @@ archive : Compressor.cu
 extract : Decompressor.cu
 	nvcc -o extract Decompressor.cu
 
+arvhice-omp : Compressor_omp.cpp
+	g++ -o archive_omp Compressor_omp.cpp
 clean :
 	@rm -f archive
 	@rm -f extract
