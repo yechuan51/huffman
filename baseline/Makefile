@@ -1,4 +1,4 @@
-all : archive extract
+all : archive extract arvhice-omp
 
 archive : Compressor.cu
 	nvcc -o archive Compressor.cu
@@ -7,10 +7,12 @@ extract : Decompressor.cu
 	nvcc -o extract Decompressor.cu
 
 arvhice-omp : Compressor_omp.cpp
-	g++ -o archive_omp Compressor_omp.cpp
+	g++ -o archive_omp Compressor_omp.cpp -fopenmp
+	
 clean :
 	@rm -f archive
 	@rm -f extract
+	@rm -f arvhice-omp
 
 test :
 	@echo "Build archive and extract"

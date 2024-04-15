@@ -102,46 +102,40 @@ struct bufferedOutStream{
         bufferByte = 0;
     }
     void append(const bufferedOutStream& source) {
-    // This method appends the contents of another bufferedOutStream (source) to this stream.
-    // First check if there is any pending bit in the current buffer byte.
+
     if (bitCounter > 0) {
-        // There are bits in the current buffer, integrate the bits from the source's first byte.
+        
         for (int i = 0; i < source.bitCounter; ++i) {
-            // Extract each bit from the source buffer byte and push it.
+            
             unsigned char bit = (source.bufferByte >> (7 - i)) & 1;
             bufferByte = (bufferByte << 1) | bit;
             bitCounter++;
 
-            // If the buffer is full, push it to the content and reset.
+
             if (bitCounter == 8) {
                 content.push_back(bufferByte);
                 bufferByte = 0;
                 bitCounter = 0;
             }
         }
-        // Now, append the remaining full bytes from the source's content.
+        
         for (auto byte : source.content) {
             pushUChar(byte);
         }
     } else {
-        // If no bits are pending in the current buffer, directly append all bytes.
+        
         content.insert(content.end(), source.content.begin(), source.content.end());
 
-        // If source has partial bits, start the new buffer byte.
+
         if (source.bitCounter > 0) {
-            bufferByte = source.bufferByte; // Take over the buffer byte
-            bitCounter = source.bitCounter; // Take over the bit counter
+            bufferByte = source.bufferByte;
+            bitCounter = source.bitCounter;
         }
     }
 }
 };
-// void writeFromUShort(unsigned short, unsigned char &, int, FILE *);
-// void writeFromUChar(unsigned char, unsigned char &, int, FILE *);
-long int sizeOfTheFile(char *);
-// void writeFileSize(long int, unsigned char &, int, FILE *);
-// void writeFileContent(FILE *, long int, string *, unsigned char &, int &, FILE *);
-// void writeIfFullBuffer(unsigned char &, int &, FILE *);
 
+long int sizeOfTheFile(char *);
 
 void cpuGenHuffmanTree(TreeNode *, int, long int *);
 void cpuEncode(bufferedOutStream&, ::vector<unsigned char>, int, string *);
@@ -183,7 +177,7 @@ int main(int argc, char *argv[])
     std::vector<unsigned char> fileData(originalFileSize);
     originalFile.read(reinterpret_cast<char *>(&fileData[0]), originalFileSize);
     originalFile.close();
-
+    
     for (int i = 0; i < originalFileSize / 2; i++)
     {
         readBuf = (fileData[i * 2 + 1] << 8) | fileData[i * 2];
@@ -195,6 +189,9 @@ int main(int argc, char *argv[])
         lastByte = fileData[originalFileSize - 1];
     }
 
+    
+    double totalBegin = getTimeStamp();
+    
     for (int i = 0; i < 65536; i++)
     {
         if (freqCount[i])
@@ -227,9 +224,6 @@ int main(int argc, char *argv[])
     double cpuEncodeBegin = getTimeStamp();
     // size_t approxCompressedSize = static_cast<size_t>( originalFileSize * 0.3);
 
-    // Writing the first piece of header information: the count of unique bytes.
-    // This count is essential for reconstructing the Huffman tree during the decompression process.
-    // fwrite(&uniqueSymbolCount, 2, 1, compressedFilePtr);
     // outStream.pushUShort(static_cast<unsigned short>(uniqueSymbolCount));
     outStream.pushNByte(&uniqueSymbolCount, 2);
     // Write last byte information.
@@ -257,11 +251,8 @@ int main(int argc, char *argv[])
         unsigned short currentCharacter = node->character;
 
         // Write the current character and its transformation string length to the compressed file.
-        // writeFromUShort(currentCharacter, bufferByte, bitCounter, compressedFilePtr);
-        // writeFromUChar(transformationLength, bufferByte, bitCounter, compressedFilePtr);
 
         outStream.pushUShort(currentCharacter);
-        // outStream.pushNByte(&currentCharacter, 2);
         outStream.pushUChar(transformationLength);
 
         // Write the transformation string bit by bit to the compressed file.
@@ -280,15 +271,10 @@ int main(int argc, char *argv[])
         }
     }
 
-    // FILE *originalFilePtr = fopen(argv[1], "rb");
-    // Writing the size of the file, its name, and its content in the compressed format.
-    // writeFileSize(originalFileSize, bufferByte, bitCounter, compressedFilePtr);
     outStream.pushFileSize(originalFileSize);
 
     ompEncode(outStream, fileData, originalFileSize, transformationStrings);
     // cpuEncode(outStream, fileData, originalFileSize, transformationStrings);
-    // writeFileContent(originalFilePtr, originalFileSize, transformationStrings, bufferByte, bitCounter, compressedFilePtr);
-    // fclose(originalFilePtr);
 
     // Ensuring the last byte is written to the compressed file by aligning the bit counter.
     outStream.align();
@@ -299,6 +285,8 @@ int main(int argc, char *argv[])
     double cpuEncodeEnd = getTimeStamp();
     printf("Encoding time: %.3f ms\n", (cpuEncodeEnd-cpuEncodeBegin) * 1000.0);
 
+    double totalEnd = getTimeStamp();
+    printf("Total time: %.3f ms\n", (totalEnd-totalBegin) * 1000.0);
     // Get the size of compressed file.
     long int compressedFileSize = sizeOfTheFile(&scompressed[0]);
     std::cout << "The size of the COMPRESSED file is: " << compressedFileSize << " bytes" << endl;
@@ -317,63 +305,6 @@ int main(int argc, char *argv[])
               << "Created compressed file: " << scompressed << endl;
     std::cout << "Compression is complete" << endl;
 }
-
-// below function is used for writing the uChar to compressed file
-// It does not write it directly as one byte instead it mixes uChar and current byte, writes 8 bits of it
-// and puts the rest to curent byte for later use
-// void writeFromUChar(unsigned char byteToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
-// {
-//     // Going to write at least 1 byte, first shift the bufferByte to the left
-//     // to make room for the new byte.
-//     bufferByte <<= 8 - bitCounter;
-//     bufferByte |= (byteToWrite >> bitCounter);
-//     fwrite(&bufferByte, 1, 1, filePtr);
-//     bufferByte = byteToWrite;
-// }
-
-// void writeFromUShort(unsigned short shortToWrite, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
-// {
-//     unsigned char firstByte = (shortToWrite >> 8) & 0xFF; // High byte
-//     unsigned char secondByte = shortToWrite & 0xFF;       // Low byte
-
-//     writeFromUChar(firstByte, bufferByte, bitCounter, filePtr);
-//     writeFromUChar(secondByte, bufferByte, bitCounter, filePtr);
-// }
-
-// This function is writing byte count of current input file to compressed file using 8 bytes
-// It is done like this to make sure that it can work on little, big or middle-endian systems
-// void writeFileSize(long int fileSize, unsigned char &bufferByte, int bitCounter, FILE *filePtr)
-// {
-//     for (int i = 0; i < 8; i++)
-//     {
-//         writeFromUChar(fileSize % 256, bufferByte, bitCounter, filePtr);
-//         fileSize /= 256;
-//     }
-// }
-
-// Below function translates and writes bytes from current input file to the compressed file.
-// void writeFileContent(FILE *originalFilePtr, long int originalFileSize, string *transformationStrings, unsigned char &bufferByte, int &bitCounter, FILE *compressedFilePtr)
-// {
-//     unsigned short readBuf;
-//     unsigned char *readBufPtr;
-//     readBufPtr = (unsigned char *)&readBuf;
-//     while (fread(readBufPtr, 2, 1, originalFilePtr))
-//     {
-//         char *strPointer = &transformationStrings[readBuf][0];
-//         while (*strPointer)
-//         {
-//             writeIfFullBuffer(bufferByte, bitCounter, compressedFilePtr);
-
-//             bufferByte <<= 1;
-//             if (*strPointer == '1')
-//             {
-//                 bufferByte |= 1;
-//             }
-//             bitCounter++;
-//             strPointer++;
-//         }
-//     }
-// }
 
 long int sizeOfTheFile(char *path)
 {
