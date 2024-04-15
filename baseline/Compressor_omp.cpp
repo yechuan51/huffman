@@ -177,7 +177,14 @@ int main(int argc, char *argv[])
     std::vector<unsigned char> fileData(originalFileSize);
     originalFile.read(reinterpret_cast<char *>(&fileData[0]), originalFileSize);
     originalFile.close();
-    
+
+
+    double totalBegin = getTimeStamp();
+
+
+    double histoBegin = getTimeStamp();
+
+    #pragma omp parallel for
     for (int i = 0; i < originalFileSize / 2; i++)
     {
         readBuf = (fileData[i * 2 + 1] << 8) | fileData[i * 2];
@@ -189,8 +196,8 @@ int main(int argc, char *argv[])
         lastByte = fileData[originalFileSize - 1];
     }
 
-    
-    double totalBegin = getTimeStamp();
+    double histoEnd = getTimeStamp();
+    printf("Histo time: %.3f ms\n", (histoEnd-histoBegin) * 1000.0);
     
     for (int i = 0; i < 65536; i++)
     {
